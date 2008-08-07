@@ -16,7 +16,7 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.1b r1',
+  version: '0.1b r2',
   date: '5 Aug 2008'
 };
 
@@ -1019,7 +1019,7 @@ var format = function(str) {
     return str.toString();
   if (str instanceof JSString)
     return '"' + str + '"';
-  if (Object.isArray(str)) {
+  if (Object.isArray(str) && str[0] instanceof Pair) {
     var str2 = str.clone();
     for (var i = 0; i < str2.length; i++) {
       str2[i] = str2[i].toString();
