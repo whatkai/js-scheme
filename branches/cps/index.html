@@ -1,9 +1,9 @@
 <html>
   <head>
     <title>js-scheme | a Scheme interpreter written in JavaScript</title>
-    <link rel="stylesheet" type="text/css" href="js-scheme.css?r=1" /> 
+    <link rel="stylesheet" type="text/css" href="js-scheme.css?r=2" /> 
     <script type="text/javascript" src="prototype.js"> </script>
-    <script type="text/javascript" src="js-scheme.js?r=2"> </script>
+    <script type="text/javascript" src="js-scheme.js?r=3"> </script>
   </head>
   <body>
     <div id="console">
@@ -11,22 +11,24 @@
       <script type="text/javascript">document.write(JSScheme.version)</script>
       -
       <script type="text/javascript">document.write(JSScheme.date)</script></h1>
-      <div class="intro title">
-	Welcome to JS-SCHEME!
-      </div>
       <div class="intro">
-	This is an interpreter for a small subset of the Scheme 
-	programming language written entirely in JavaScript.
-      </div>
-      <div class="intro">
-	Enter <span style="font-weight:bold;color:green;">(help)</span> for 
-	more information.
+	<p>
+	  Welcome to JS-SCHEME!
+	</p>
+	<p>
+	  This is an interpreter for a small subset of the Scheme 
+	  programming language written entirely in JavaScript.
+	</p>
+	<p>
+	  Enter <span style="font-weight:bold;color:green;">(help)</span> for 
+	  more information.
+	</p>
       </div>
       <noscript>
 	<span class="error">Oops!  JavaScript is disabled.</span>
       </noscript>
     </div>
-    <form onsubmit="return repl();">
+    <form onsubmit="jscm_repl(); return false;">
       <span id="prefix">&gt;&nbsp;</span><input type="text" name="input" id="input" />
     </form>
     <!--[if IE]>
