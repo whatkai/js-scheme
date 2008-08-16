@@ -17,7 +17,7 @@
 var JSScheme = {
   author: 'Erik Silkensen',
   version: '0.2b r1',
-  date: '14 Aug 2008'
+  date: '16 Aug 2008'
 };
 
 var  Document = {
@@ -76,6 +76,7 @@ ActionTokens[Tokens.EVAL] = true;
 var Util = new (Class.create({
   initialize: function()
   {
+    this._isIdentifier = this.createMatcher(Tokens.IDENTIFIER);
     this.isString = this.createMatcher(Tokens.STRING);
     this.isBinary = this.createMatcher(Tokens.BINARY);
     this.isDecimal = this.createMatcher(Tokens.DECIMAL);
@@ -84,6 +85,11 @@ var Util = new (Class.create({
     var OR = '|';
     this.isNumber = this.createMatcher(Tokens.BINARY + OR + Tokens.DECIMAL +
 				       OR + Tokens.HEX + OR + Tokens.OCTAL);
+  },
+  isIdentifier: function(expr)
+  {
+    return !this.isNumber(expr) && !this.isString(expr) &&
+      this._isIdentifier(expr);
   },
   car: function(list)
   {
@@ -216,12 +222,12 @@ var Promise = Class.create({
     this.hasForced = false;
     this.id = ++Promise.instances;
   },
-  force: function() {
+  force: function(c) {
     if (!this.hasForced) {
       this.promise = meaning(this.promise, this.env);
       this.hasForced = true;
     }
-    return this.promise;
+    c(this.promise);
   },
   toString: function() {
     return '#[promise ' + this.id + ']';
@@ -519,6 +525,11 @@ var Actions = {
 			     if (proc instanceof Builtin) {
 			       proc = proc.apply;
 			     }
+			     if (typeof proc != 'function') {
+			       throw new JSError('The object ' +
+						 Util.format(proc) +
+						 ' is not applicable.', 'Type');
+			     }
 			     proc(args, c);
 			   });
 	      });
@@ -541,10 +552,7 @@ var Actions = {
   },
   getReserved: function(key)
   {
-    return function(expr, env, c)
-    {
-      c(Util.format(expr));
-    };
+    return ReservedSymbolTable.get(key).apply;
   }
 };
 
@@ -655,7 +663,10 @@ var ReservedSymbolTable = new Hash({
 	throw IllegalArgumentTypeError('call-with-current-continuation',
 	  args[0], 1);
       }
-      args[0](c, c);
+      args[0]([function(val) {
+		 c(val[0]);
+		 throw new Escape();
+	       }], c);
   }, '<p>Calls <em>proc</em> with the current continuation.</p>', 'proc'),
   'car': new Builtin('car', function(args, c) {
     var ans = undefined;
@@ -730,7 +741,7 @@ var ReservedSymbolTable = new Hash({
     var name = e[1];
     if (Util.isAtom(e[1])) {
       if (!Util.isIdentifier(name)) {
-	throw new Warning(name + ' may not be defined.');
+	throw new JSWarning(name + ' may not be defined.');
       } else if (ReservedSymbolTable.get(name) != undefined) {
 	if (e.length == 2 || e.length == 3) {
 	  if (e.length == 2) {
@@ -752,7 +763,7 @@ var ReservedSymbolTable = new Hash({
 	    c(name);
 	  } else {
 	    jscm_eval(e[2], env, function(val) {
-			evn.extend(name, new Box(val));
+			env.extend(name, new Box(val));
 			c(name);
 		      });
 	  }
@@ -763,7 +774,7 @@ var ReservedSymbolTable = new Hash({
     } else if (!Util.isNull(name)) {
       name = e[1][0];
       if (!Util.isIdentifier(name)) {
-	throw new Warning(name + ' may not be defined.');
+	throw new JSWarning(name + ' may not be defined.');
       } else {
 	var rhs = Util.cons(Tokens.LAMBDA,
 		            Util.cons(Util.cdr(Util.car(Util.cdr(e))),
@@ -775,7 +786,7 @@ var ReservedSymbolTable = new Hash({
 		    });
 	} else {
 	  jscm_eval(rhs, env, function(val) {
-		      evn.extend(name, new Box(val));
+		      env.extend(name, new Box(val));
 		      c(name);
 		    });
 	}
@@ -844,7 +855,7 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentCountError('force', 'exactly', 1, args.length);
     if (!(args[0] instanceof Promise))
       throw IllegalArgumentTypeError('force', args[0], 1);
-    c(args[0].force());
+    args[0].force(c);
   }, 'Forces the value of <em>promise</em>.  If no value has been ' +
     'computed for the promise, then that value is computed, memoized, and ' +
     'returned.', 'promise'),
@@ -866,8 +877,9 @@ var ReservedSymbolTable = new Hash({
 	proc = proc.apply;
       if (typeof proc != 'function')
 	throw IllegalArgumentTypeError('for-each', proc, 1);
-      proc.apply(this, [pargs], c);
+      proc.apply(this, [pargs, function(k) { }]);
     }
+    c(undefined);
   }, '<p>Applies <em>proc</em> element-wise to the elements of the ' +
     '<em>list</em>s and returns a list of the results, in order.</p>' +
     '<p><em>Proc</em> must be a function of as many arguments as there are ' +
@@ -876,39 +888,50 @@ var ReservedSymbolTable = new Hash({
     throw new Escape(jscm_printHelp, args);
   }, 'Displays help information for JS-SCHEME.'),
   'if': new SpecialForm('if', function(e, env, c) {
-    return evif(cdr(e), env);
+    jscm_evif(Util.cdr(e), env, function(val) {
+		c(val);
+	      });
   }, 'An <strong>if</strong> expression ', 'test consequent [alternate]'),
   'lambda': new SpecialForm('lambda', function(e, env, c) {
-    if (formalsOf(e).length != formalsOf(e).uniq().length)
-      throw "Ill-formed special form: " + format(e);
-    return function(args) {
+    if (e[1].length != e[1].uniq().length)
+      throw "Ill-formed special form: " + Util.format(e);
+    c(function(args, k) {
       env = env.extension();
-      if (formalsOf(e).length != args.length)
+      if (e[1].length != args.length)
 	throw IllegalArgumentCountError('#[compound-procedure]', 'exactly',
-					formalsOf(e).length, args.length);
-      env.multiExtend(formalsOf(e), boxAll(args));
-      return beglis(bodyOf(e), env);
-    };
+					e[1].length, args.length);
+      var bargs = [];
+      for (var i = 0; i < args.length; i++) {
+	bargs[i] = new Box(args[i]);
+      }
+      env.multiExtend(e[1], bargs);
+      jscm_beglis(Util.cdr(Util.cdr(e)), env, function(val) {
+		    k(val);
+		  });
+    });
   }, 'Evaluates to a procedure.  Currently, the formals <u>must</u> be in ' +
     'the form of a list. <p><br />((lambda (a) (+ a 1)) 2) ==> 3 ' +
     '; procedure that adds 1 to a</p>',
     '(formals) body'),
-  'length': new Builtin('length', function(args) {
+  'length': new Builtin('length', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('length', 'exactly', 1, args.length);
     if (!Object.isArray(args[0]))
       throw IllegalArgumentTypeError('length', args[0], 1);
-    return args[0].length;
+    c(args[0].length);
   }, 'Returns the length of <em>list</em>.', 'list'),
-  'let': new Builtin('let', function(e, env) {
-    return meaning(cons(cons(Tokens.LAMBDA,
-                             cons(map(function(el) {
-					return car(el);
-				      }, car(cdr(e))),
-				  (cdr(cdr(e))))),
-			map(function(el) {
-			      return (car(cdr(el)));
-			    }, car(cdr(e)))), env);
+  'let': new Builtin('let', function(e, env, c) {
+    var expr = Util.cons(Util.cons(Tokens.LAMBDA,
+                                   Util.cons(Util.map(function(el) {
+			                         return Util.car(el);
+				               }, Util.car(Util.cdr(e))),
+				             (Util.cdr(Util.cdr(e))))),
+			 Util.map(function(el) {
+			     return (Util.car(Util.cdr(el)));
+			   }, Util.car(Util.cdr(e))));
+    jscm_eval(expr, env, function(val) {
+		c(val);
+	      });
   }, '<p><em>bindings</em> is a list of pairs where the form of the pair is: ' +
     '</p><p>(<em>variable</em> <em>init</em>)</p><p>Each <em>init</em> is ' +
     'evaluated in the current environment, in some unspecified order, and ' +
@@ -917,28 +940,31 @@ var ReservedSymbolTable = new Hash({
     'value of the last expression is the value of the let expression.</p>' +
     '<p><em>body</em> is evaluated in an extended environment.</p>',
      'bindings body'),
-  'let*': new Builtin('let*', function(e, env) {
+  'let*': new Builtin('let*', function(e, env, c) {
     var help = function(e, b) {
-      if (isNull(e)) {
+      if (Util.isNull(e)) {
 	return [];
       } else if (e.length == 1) {
-	return cons(cons(Tokens.LAMBDA,
-			 cons(cons(car(car(e)),
+	return Util.cons(Util.cons(Tokens.LAMBDA,
+			 Util.cons(Util.cons(Util.car(Util.car(e)),
 				   []),
 			      b)),
-		    cons(car(cdr(car(e))),
+		    Util.cons(Util.car(Util.cdr(Util.car(e))),
 			 []));
       } else {
-	return cons(cons(Tokens.LAMBDA,
-			 cons(cons(car(car(e)),
+	return Util.cons(Util.cons(Tokens.LAMBDA,
+			 Util.cons(Util.cons(Util.car(Util.car(e)),
 				   []),
-			      cons(help(cdr(e), b),
+			      Util.cons(help(Util.cdr(e), b),
 			           []))),
-		    cons(car(cdr(car(e))),
+		    Util.cons(Util.car(Util.cdr(Util.car(e))),
 		         []));
       }
     };
-    return meaning(help(car(cdr(e)), (cdr(cdr(e)))), env);
+    var expr = help(Util.car(Util.cdr(e)), Util.cdr(Util.cdr(e)));
+    jscm_eval(expr, env, function(val) {
+		c(val);
+	      });
   }, '<p><em>bindings</em> is a list of pairs where the form of the pair is: ' +
     '</p><p>(<em>variable</em> <em>init</em>)</p><p>Each <em>init</em> is ' +
     'evaluated sequentially from left to right, where each binding to the ' +
@@ -948,19 +974,21 @@ var ReservedSymbolTable = new Hash({
     'value of the last expression is the value of the let expression.</p>' +
     '<p><em>body</em> is evaluated in an extended environment.</p>',
      'bindings body'),
-  'letrec': new Builtin('letrec', function(e, env) {
-    var body = cdr(cdr(e));
+  'letrec': new SpecialForm('letrec', function(e, env, c) {
+    var body = Util.cdr(Util.cdr(e));
     var col = function(li) {
-      body = cons(cons(Tokens.DEFINE,
-		       cons(car(li),
-			    cdr(li))),
+      body = Util.cons(Util.cons(Tokens.DEFINE,
+		       Util.cons(Util.car(li),
+			    Util.cdr(li))),
 		  body);
     };
-    map(col, car(cdr(e)));
-    var lisp = cons(cons(Tokens.LAMBDA,
-			 cons([], body)),
+    Util.map(col, Util.car(Util.cdr(e)));
+    var lisp = Util.cons(Util.cons(Tokens.LAMBDA,
+			 Util.cons([], body)),
 		    []);
-    return meaning(lisp, env);
+    jscm_eval(lisp, env, function(val) {
+		c(val);
+	      });
   }, '<p><em>bindings</em> is a list of pairs where the form of the pair is: ' +
     '</p><p>(<em>variable</em> <em>init</em>)</p><p>Each <em>init</em> is ' +
     'bound to the corresponding <em>variable</em>, in some unspecified ' +
@@ -970,169 +998,183 @@ var ReservedSymbolTable = new Hash({
     'value of the last expression is the value of the let expression.</p>' +
     '<p><em>body</em> is evaluated in an extended environment.</p>',
      'bindings body'),
- 'list': new Builtin('list', function(args) {
-    return args;
+  'list': new Builtin('list', function(args, c) {
+    c(args);
   }, 'Returns a list made up of the arguments.',
     'obj<sub>1</sub> . obj<sub>n</sub>'),
-  'list?': new Builtin('list?', function(args) {
-    if (args.length != 1)
+  'list?': new Builtin('list?', function(args, c) {
+    if (args.length != 1) {
       throw IllegalArgumentCountError('list?', 'exactly', 1, args.length);
-    if (isAtom(args[0]))
-      return false;
-    if (isNull(args[0]))
-      return true;
-    for (var i = 0; i < args[0].length; i++) {
-      if (isAtom(args[0][i]) && (args[0][i] instanceof Pair) &&
-	  !isNull(args[0][i].cdr))
-	return false;
+    } else if (Util.isAtom(args[0])) {
+      c(false);
+    } else if (Util.isNull(args[0])) {
+      c(true);
+    } else {
+      var ans = true;
+      for (var i = 0; i < args[0].length; i++) {
+	if (Util.isAtom(args[0][i]) && (args[0][i] instanceof Pair) &&
+	    !Util.isNull(args[0][i].cdr)) {
+	    ans = false;
+	    break;
+	}
+	c(ans);
+      }
     }
-    return true;
   }, 'Returns #t if <em>obj</em> is a list, and returns #f otherwise.', 'obj'),
-  'map': new Builtin('map', function(args) {
+ 'map': new Builtin('map', function(args, c) {
     if (args.length < 2)
       throw IllegalArgumentCountError('map', 'at least', 2, args.length);
-    var proc = car(args);
-    var lists = cdr(args);
+    var proc = args[0];
+    var lists = Util.cdr(args);
     for (var i = 1; i < lists.length; i++) {
       if (lists[i].length != lists[0].length)
 	throw "IllegalArgumentError: all of the lists must be the same length";
     }
     var res = [];
-    for (var i = 0; i < lists[0].length; i++) {
+    for (var j = 0; j < lists[0].length; j++) {
       var pargs = [];
-      for (var j = 0; j < lists.length; j++) {
-	pargs.push(lists[j][i]);
+      for (var k = 0; k < lists.length; k++) {
+	pargs.push(lists[k][j]);
       }
       if (proc instanceof Builtin)
 	proc = proc.apply;
       if (typeof proc != 'function')
 	throw IllegalArgumentTypeError('map', proc, 1);
-      res.push(proc.apply(this, [pargs]));
+      proc.apply(this, [pargs, function(val) {
+		   res.push(val);
+		 }]);
     }
-    return res;
+    c(res);
   }, '<p>Applies <em>proc</em> element-wise to the elements of the ' +
     '<em>list</em>s and returns a list of the results, in order.</p>' +
     '<p><em>Proc</em> must be a function of as many arguments as there are ' +
     'lists specified.</p>', 'proc list<sub>1</sub> . list<sub>n</sub>'),
-  'not': new Builtin('not', function(args) {
+  'not': new Builtin('not', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('not', 'exactly', 1, args.length);
-    return car(args) == false;
+    c(args[0] == false);
   },'<p><em>not</em> returns #t if <em>obj</em> is false, and returns #f ' +
    'otherwise.</p><p>Note: <b>#f</b> is the <u>only</u> false value in ' +
    'conditional expressions.</p>', 'obj'),
-  'null?': new Builtin('null?', function(args) {
+  'null?': new Builtin('null?', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('null?', 'exactly', 1, args.length);
-    return isNull(args[0]);
+    c(Util.isNull(args[0]));
   }, 'Returns #t if <em>obj</em> is the empty list, and returns #f otherwise.',
     'obj'),
-  'number?': new Builtin('number?', function(args) {
+  'number?': new Builtin('number?', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('number?', 'exactly', 1, args.length);
-    return isNumber(args[0]);
+    c(Util.isNumber(args[0]));
   }, 'Returns #t if <em>obj</em> is a number, and returns #f otherwise.',
     'obj'),
-  'odd?': new Builtin('odd?', function(args) {
+  'odd?': new Builtin('odd?', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('odd?', 'exactly', 1, args.length);
-    if (!isNumber(args[0]))
+    if (!Util.isNumber(args[0]))
       throw IllegalArgumentTypeError('odd?', args[0], 1);
-    return args[0] % 2 != 0;
+    c(args[0] % 2 != 0);
   }, 'Returns #t if <em>n</em> is odd, and returns #f otherwise.', 'n'),
-  'or': new Builtin('or', function(args) {
-    for (var i = 0; i < args.length; i++)
-      if (args[i])
-	return args[i];
-    return false;
+ 'or': new Builtin('or', function(args, c) {
+   var ans = false;
+   for (var i = 0; i < args.length; i++) {
+     if (args[i]) {
+       ans = args[i];
+       break;
+     }
+   }
+   c(ans);
   },'<p>The logical <em>or</em> returns the first element in its argument ' +
    'list that doesn\'t evaluate to #f.  Otherwise, returns #f.</p>' +
    '<p>Note: <b>#f</b> is the <u>only</u> false value in conditional ' +
    'expressions.</p>', 'obj<sub>1</sub> . obj<sub>n</sub>'),
-  'pair?': new Builtin('pair?', function(args) {
+  'pair?': new Builtin('pair?', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('pair?', 'exactly', 1, args.length);
-    return !isNull(args[0]) && !isAtom(args[0]);
+    c(!Util.isNull(args[0]) && !Util.isAtom(args[0]));
   }, 'Returns #t if <em>obj</em> is a pair, and returns #f otherwise.', 'obj'),
-  'pow': new Builtin('pow', function(args) {
+  'expt': new Builtin('expt', function(args, c) {
     if (args.length != 2)
-      throw IllegalArgumentCountError('pow', 'exactly', 1, args.length);
-    if (!isNumber(args[0]))
-      throw IllegalArgumentTypeError('pow', args[0], 1);
-    if (!isNumber(args[1]))
-      throw IllegalArgumentTypeError('pow', args[1], 2);
-    return Math.pow(args[0], args[1]);
+      throw IllegalArgumentCountError('expt', 'exactly', 1, args.length);
+    if (!Util.isNumber(args[0]))
+      throw IllegalArgumentTypeError('expt', args[0], 1);
+    if (!Util.isNumber(args[1]))
+      throw IllegalArgumentTypeError('expt', args[1], 2);
+    c(Math.pow(args[0], args[1]));
   }, 'Returns <em>a</em> to the power of <em>b</em>.', 'a b'),
-  'quote': new Builtin('quote', function(e, env) {
-    return function(args) {
+  'quote': new Builtin('quote', function(e, env, c) {
+    return function(args, c) {
       if (args.length != 1)
 	throw IllegalArgumentCountError('quote', 'exactly', 1, args.length);
-      return args[0];
-    }(cdr(e));
+      c(args[0]);
+    }(Util.cdr(e), c);
   }, '<p>Evaluates to <em>datum</em>.</p><p>The single-quote character ' +
     '<strong>\'</strong> may also be used as an abbreviation, where ' +
     '<strong>\'<em>datum</em></strong> is equivalent to <strong>(quote <em>' +
     'datum</em></strong>)</p>', 'datum'),
-  'reverse': new Builtin('reverse', function(args) {
+  'reverse': new Builtin('reverse', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('reverse', 'exactly', 1, args.length);
     if (!Object.isArray(args[0]))
       throw IllegalArgumentTypeError('reverse', args[0], 1);
-    return args[0].reverse(false);
+    c(args[0].reverse(false));
   }, 'Returns a newly allocated list containing the elements of ' +
     '<em>list</em> in reverse order.', 'list'),
-  'set!': new Builtin('set!', function(e, env) {
-    var oldBox = env.lookup(nameOf(e));
-    var old = unbox(oldBox);
-    setbox(oldBox, meaning(rightSideOf(e), env));
-    return old;
+  'set!': new SpecialForm('set!', function(e, env, c) {
+    var oldBox = env.lookup(e[1]);
+    var old = oldBox.unbox();
+    var rhs = Util.isNull(Util.cdr(Util.cdr(e))) ? 0 : e[2];
+    jscm_eval(rhs, env, function(val) {
+		oldBox.setbox(val);
+		c(old);
+	      });
   }, 'Similar to <strong>define</strong>, except that <em>variable</em> must ' +
     'already be in the environment. If no <em>expression</em> is present, ' +
     '0 is used. Returns the original value that <em>variable</em> referred to.',
     'variable [expression]'),
-  'sin': new Builtin('sin', function(args) {
+  'sin': new Builtin('sin', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('sin', 'exactly', 1, args.length);
-    if (!isNumber(args[0]))
+    if (!Util.isNumber(args[0]))
       throw IllegalArgumentTypeError('sin', args[0], 1);
-    return Math.cos(args[0]);
+    c(Math.cos(args[0]));
   }, 'Returns the sine (in radians) of <em>number</em> using the JavaScript ' +
     '<strong>Math.sin()</strong> function.', 'number'),
-  'tan': new Builtin('tan', function(args) {
+  'tan': new Builtin('tan', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('tan', 'exactly', 1, args.length);
-    if (!isNumber(args[0]))
+    if (!Util.isNumber(args[0]))
       throw IllegalArgumentTypeError('tan', args[0], 1);
-    return Math.tan(args[0]);
+    c(Math.tan(args[0]));
   }, 'Returns the tangent (in radians) of <em>number</em> using the ' +
     'JavaScript <strong>Math.tan()</strong> function.', 'number'),
-  'zero?': new Builtin('zero?', function(args) {
+  'zero?': new Builtin('zero?', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('zero?', 'exactly', 1, args.length);
-    if (!isNumber(args[0]))
+    if (!Util.isNumber(args[0]))
       throw IllegalArgumentTypeError('zero?', args[0], 1);
-    return args[0] === 0;
+    c(args[0] === 0);
   }, 'Returns #t if <em>number</em> is 0, and returns #f otherwise.', 'number'),
-  '=': new Builtin('=', function(args) {
-    return mapCmp(function(lhs, rhs) { return lhs != rhs; }, args);
+  '=': new Builtin('=', function(args, c) {
+    c(Util.mapCmp(function(lhs, rhs) { return lhs != rhs; }, args));
   }, 'Returns #t if every argument is "equal," and returns #f otherwise. ' +
     'Equality is determined using the JavaScript <strong>==</strong> operator.',
     'obj<sub>1</sub> . obj<sub>n</sub>'),
-  '<': new Builtin('<', function(args) {
-    return mapCmp(function(lhs, rhs) { return lhs >= rhs; }, args);
+  '<': new Builtin('<', function(args, c) {
+    c(Util.mapCmp(function(lhs, rhs) { return lhs >= rhs; }, args));
   }, 'Returns #t if the first argument is less than every other argument, and' +
     ' returns #f otherwise.', 'number<sub>1</sub> . number<sub>n</sub>'),
-  '>': new Builtin('>', function(args) {
-    return mapCmp(function(lhs, rhs) { return lhs <= rhs; }, args);
+  '>': new Builtin('>', function(args, c) {
+    c(Util.mapCmp(function(lhs, rhs) { return lhs <= rhs; }, args));
   }, 'Returns #t if the first argument is greater than every other argument, ' +
     'and returns #f otherwise.', 'number<sub>1</sub> . number<sub>n</sub>'),
-  '<=': new Builtin('<=', function(args) {
-    return mapCmp(function(lhs, rhs) { return lhs > rhs; }, args);
+  '<=': new Builtin('<=', function(args, c) {
+    c(Util.mapCmp(function(lhs, rhs) { return lhs > rhs; }, args));
   }, 'Returns #t if the first argument is less than or equal to every other ' +
     'argument, and returns #f otherwise.', 'number<sub>1</sub> . number<sub>' +
     'n</sub>'),
-  '>=': new Builtin('>=', function(args) {
-    return mapCmp(function(lhs, rhs) { return lhs < rhs; }, args);
+  '>=': new Builtin('>=', function(args, c) {
+    c(Util.mapCmp(function(lhs, rhs) { return lhs < rhs; }, args));
   }, 'Returns #t if the first argument is greater than or equal to every ' +
     'other argument, and returns #f otherwise.',
     'number<sub>1</sub> . number<sub>n</sub>'),
@@ -1265,20 +1307,33 @@ function jscm_eval(expr, env, c)
   jscm_expressionToAction(expr)(expr, env, c);
 }
 
-function jscm_evlis(arglis, env, c)
+function jscm_beglis(es, env, c)
 {
-  var args = [];
-  var collector = function(arglist) {
-    if (Util.isNull(arglist)) {
-      c(args);
+  var begger = function(elist) {
+    if (Util.isNull(Util.cdr(elist))) {
+      jscm_eval(elist[0], env, function(val) {
+		  c(val);
+		});
     } else {
-      jscm_eval(arglist[0], env, function(arg) {
-		  args.push(arg);
-		  collector(Util.cdr(arglist));
+      jscm_eval(elist[0], env, function(val) {
+		  begger(Util.cdr(elist));
 		});
     }
   };
-  collector(arglis);
+  begger(es);
+}
+
+function jscm_evlis(arglis, env, c)
+{
+  if (Util.isNull(arglis)) {
+    c([]);
+  } else {
+    jscm_evlis(Util.cdr(arglis), env, function(arg) {
+		 jscm_eval(arglis[0], env, function(carg) {
+			     c(Util.cons(carg, arg));
+			   });
+	       });
+  }
 }
 
 function jscm_evcon(lines, env, c)
@@ -1288,6 +1343,19 @@ function jscm_evcon(lines, env, c)
 		jscm_eval(lines[0][1], env, c);
 	      } else {
 		jscm_evcon(Util.cdr(lines), env, c);
+	      }
+	    });
+}
+
+function jscm_evif(args, env, c)
+{
+  jscm_eval(args[0], env, function(test) {
+	      if (test) {
+		jscm_eval(args[1], env, c);
+	      } else if (args.length < 3) {
+		c(undefined);
+	      } else {
+		jscm_eval(args[2], env, c);
 	      }
 	    });
 }
