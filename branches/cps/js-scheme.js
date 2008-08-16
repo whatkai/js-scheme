@@ -173,6 +173,9 @@ var Util = new (Class.create({
 	.gsub('\'','');
     }
   },
+  map: function(op, args) {
+    // TODO:
+  },
   mapCmp: function(op, args) {
     for (var i = 1; i < args.length; i++) {
       if (op(this.car(args), args[i])) {
@@ -868,6 +871,7 @@ var ReservedSymbolTable = new Hash({
       if (lists[i].length != lists[0].length)
 	throw IllegalArgumentError("all of the lists must be the same length");
     }
+    /* rewrite
     for (var i = 0; i < lists[0].length; i++) {
       var pargs = [];
       for (var j = 0; j < lists.length; j++) {
@@ -877,9 +881,27 @@ var ReservedSymbolTable = new Hash({
 	proc = proc.apply;
       if (typeof proc != 'function')
 	throw IllegalArgumentTypeError('for-each', proc, 1);
-      proc.apply(this, [pargs, function(k) { }]);
+      proc.apply(this, [pargs, function(k) { alert(i); }]);
     }
     c(undefined);
+
+     rewrite */
+    var inner = function(largs) {
+      if (Util.isNull(largs[0])) {
+	c(undefined);
+      } else {
+	var pargs = [];
+	var nargs = [];
+	for (var i = 0; i < largs.length; i++) {
+	  pargs.push(Util.car(largs[i]));
+	  nargs.push(Util.cdr(largs[i]));
+	}
+	proc.apply(this, [pargs, function(val) {
+			    inner(nargs);
+			  }]);
+      }
+    };
+    inner(lists);
   }, '<p>Applies <em>proc</em> element-wise to the elements of the ' +
     '<em>list</em>s and returns a list of the results, in order.</p>' +
     '<p><em>Proc</em> must be a function of as many arguments as there are ' +
