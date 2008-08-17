@@ -63,7 +63,7 @@ var ActionTokens = { };
 ActionTokens[Tokens.QUOTE] = true;
 ActionTokens[Tokens.LAMBDA] = true;
 ActionTokens[Tokens.LET] = true;
-ActionTokens[Tokens.LETS] = true;
+ActionTokens[Tokens.LET_STAR] = true;
 ActionTokens[Tokens.LETREC] = true;
 ActionTokens[Tokens.SET] = true;
 ActionTokens[Tokens.COND] = true;
@@ -174,7 +174,11 @@ var Util = new (Class.create({
     }
   },
   map: function(op, args) {
-    // TODO:
+    var res = [];
+    for (var i = 0; i < args.length; i++) {
+      res.push(op(args[i]));
+    }
+    return res;
   },
   mapCmp: function(op, args) {
     for (var i = 1; i < args.length; i++) {
@@ -871,21 +875,6 @@ var ReservedSymbolTable = new Hash({
       if (lists[i].length != lists[0].length)
 	throw IllegalArgumentError("all of the lists must be the same length");
     }
-    /* rewrite
-    for (var i = 0; i < lists[0].length; i++) {
-      var pargs = [];
-      for (var j = 0; j < lists.length; j++) {
-	pargs.push(lists[j][i]);
-      }
-      if (proc instanceof Builtin)
-	proc = proc.apply;
-      if (typeof proc != 'function')
-	throw IllegalArgumentTypeError('for-each', proc, 1);
-      proc.apply(this, [pargs, function(k) { alert(i); }]);
-    }
-    c(undefined);
-
-     rewrite */
     var inner = function(largs) {
       if (Util.isNull(largs[0])) {
 	c(undefined);
