@@ -16,8 +16,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.2b r1',
-  date: '16 Aug 2008'
+  version: '0.2b r1, CPS',
+  date: '17 Aug 2008'
 };
 
 var  Document = {
@@ -159,6 +159,8 @@ var Util = new (Class.create({
       return '#t';
     } else if (expr === false) {
       return '#f';
+    } else if (expr instanceof Promise) {
+      return expr.toString();
     } else if (expr instanceof JSString) {
       return '"' + expr + '"';
     } else if (Object.isArray(expr) && expr[0] instanceof Pair) {
@@ -226,13 +228,15 @@ var Promise = Class.create({
       Promise.instances = 0;
     this.promise = e;
     this.env = env;
-    this.hasForced = false;
+    this.memoized = false;
     this.id = ++Promise.instances;
   },
   force: function(c) {
-    if (!this.hasForced) {
-      this.promise = meaning(this.promise, this.env);
-      this.hasForced = true;
+    if (!this.memoized) {
+      jscm_eval(this.promise, this.env, function(val) {
+		  this.promise = val;
+		  this.memoized = true;
+		}.bind(this));
     }
     c(this.promise);
   },
@@ -279,6 +283,7 @@ var Environment = Class.create({
     this.parent = parent;
   },
   lookup: function(name) {
+    name = name.toLowerCase();
     if (this.table.get(name) === undefined) {
       if (this.parent === undefined) {
 	throw UnboundVariableError(name);
@@ -290,6 +295,7 @@ var Environment = Class.create({
     }
   },
   extend: function(name, value) {
+    name = name.toLowerCase();
     this.table.set(name, value);
   },
   multiExtend: function(names, values) {
@@ -311,13 +317,6 @@ var Box = Class.create({
   },
   setbox: function(obj) {
     this.obj = obj;
-  }
-});
-
-var Closure = Class.create({
-  initialize: function(expr, env) {
-    this.expr = expr;
-    this.env = env;
   }
 });
 
@@ -543,23 +542,24 @@ var Actions = {
   },
   CONST: function(expr, env, c)
   {
-    if (Util.isNumber(expr)) {
-      c(Util.getNumber(expr));
+    var exprl = expr.toLowerCase();
+    if (Util.isNumber(exprl)) {
+      c(Util.getNumber(exprl));
     } else if (Util.isString(expr)) {
       c(Util.getString(expr));
-    } else if (ReservedSymbolTable.get(expr) != undefined) {
-      c(ReservedSymbolTable.get(expr));
+    } else if (ReservedSymbolTable.get(exprl) != undefined) {
+      c(ReservedSymbolTable.get(exprl));
     } else {
-      c(new ValueError(expr + " not recognized as CONST"));
+      throw new JSError(expr + " not recognized as CONST", "Value");
     }
   },
   IDENTIFIER: function(expr, env, c)
   {
-    c(env.lookup(expr).unbox());
+    c(env.lookup(expr.toLowerCase()).unbox());
   },
   getReserved: function(key)
   {
-    return ReservedSymbolTable.get(key).apply;
+    return ReservedSymbolTable.get(key.toLowerCase()).apply;
   }
 };
 
@@ -580,7 +580,7 @@ var SpecialForm = Class.create(Builtin, {
     $super(name, apply, doc, argdoc);
   },
   toString: function() {
-    return '#[special-form-' + this.name + '>';
+    return '#<special-form-' + this.name + '>';
   }
 });
 
@@ -746,7 +746,8 @@ var ReservedSymbolTable = new Hash({
     ' <strong>Math.cos()</strong> function.', 'number'),
   'define': new SpecialForm('define', function(e, env, c) {
     var name = e[1];
-    if (Util.isAtom(e[1])) {
+    if (Util.isAtom(name)) {
+      name = name.toLowerCase();
       if (!Util.isIdentifier(name)) {
 	throw new JSWarning(name + ' may not be defined.');
       } else if (ReservedSymbolTable.get(name) != undefined) {
@@ -761,7 +762,7 @@ var ReservedSymbolTable = new Hash({
 		      });
 	  }
 	} else {
-	  throw IllegalArgumentCountError('define', '2 or', 3, args.length);
+	  throw IllegalArgumentCountError('define', '1 or', 2, e.length - 1);
 	}
       } else {
 	if (e.length == 2 || e.length == 3) {
@@ -775,11 +776,11 @@ var ReservedSymbolTable = new Hash({
 		      });
 	  }
 	} else {
-	  throw IllegalArgumentCountError('define', '2 or', 3, args.length);
+	  throw IllegalArgumentCountError('define', '1 or', 2, e.length - 1);
 	}
       }
     } else if (!Util.isNull(name)) {
-      name = e[1][0];
+      name = e[1][0].toLowerCase();
       if (!Util.isIdentifier(name)) {
 	throw new JSWarning(name + ' may not be defined.');
       } else {
@@ -1378,6 +1379,7 @@ function jscm_expressionToAction(expr)
 
 function jscm_atomToAction(atom)
 {
+  atom = atom.toLowerCase();
   return Util.isNumber(atom) || Util.isString(atom) ||
     ReservedSymbolTable.get(atom) != undefined ?
       Actions.CONST : Actions.IDENTIFIER;
@@ -1385,7 +1387,7 @@ function jscm_atomToAction(atom)
 
 function jscm_listToAction(list)
 {
-    return Util.isAtom(list[0]) && ActionTokens[list[0]] ?
+    return Util.isAtom(list[0]) && ActionTokens[list[0].toLowerCase()] ?
       Actions.getReserved(list[0]) : Actions.APPLICATION;
 }
 
