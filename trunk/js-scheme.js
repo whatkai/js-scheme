@@ -1131,11 +1131,20 @@ var ReservedSymbolTable = new Hash({
   }, 'Returns a newly allocated list containing the elements of ' +
     '<em>list</em> in reverse order.', 'list'),
   'set!': new SpecialForm('set!', function(e, env) {
-    var oldBox = env.lookup(e[1]);
-    var old = oldBox.unbox();
+    var oldBox = undefined;
+    var name = e[1].toLowerCase();
+    var old = ReservedSymbolTable.get(name);
+    if (old === undefined) {
+      oldBox = env.lookup(name);
+      old = oldBox.unbox();
+    }
     var rhs = Util.isNull(Util.cdr(Util.cdr(e))) ? 0 : e[2];
     var val = jscm_eval(rhs, env);
-    oldBox.setbox(val);
+    if (oldBox === undefined) {
+      ReservedSymbolTable.set(name, val);
+    } else {
+      oldBox.setbox(val);
+    }
     return old;
   }, 'Similar to <strong>define</strong>, except that <em>variable</em> must ' +
     'already be in the environment. If no <em>expression</em> is present, ' +
