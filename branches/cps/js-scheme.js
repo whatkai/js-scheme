@@ -565,6 +565,8 @@ var Actions = {
 
 var Builtin = Class.create({
   initialize: function(name, apply, doc, argdoc) {
+    Builtin.instances = Builtin.instances === undefined ? 0 : Builtin.instances;
+    Builtin.instances++;
     this.name = name;
     this.apply = apply;
     this.doc = doc;
@@ -674,7 +676,9 @@ var ReservedSymbolTable = new Hash({
 		 c(val[0]);
 		 throw new Escape();
 	       }], c);
-  }, '<p>Calls <em>proc</em> with the current continuation.</p>', 'proc'),
+  }, '<p>Calls <em>proc</em> with the current continuation.</p>' +
+    '<p>This interpreter is written in CPS; the continuation object is ' +
+    'first-class.</p>', 'proc'),
   'car': new Builtin('car', function(args, c) {
     var ans = undefined;
     if (args.length != 1) {
@@ -823,7 +827,7 @@ var ReservedSymbolTable = new Hash({
     c(undefined);
   }, 'Prints <em>obj</em>.', 'obj'),
   'display-built-ins': new Builtin('display-built-ins', function(args, c) {
-    throw new Escape(printBuiltinsHelp, args);
+    throw new Escape(jscm_printBuiltinsHelp, args);
   }, 'Displays the list of built-in procedures.'),
   'else': true,
   'eval': new SpecialForm('eval', function(e, env, c) {
@@ -868,9 +872,13 @@ var ReservedSymbolTable = new Hash({
     'computed for the promise, then that value is computed, memoized, and ' +
     'returned.', 'promise'),
   'for-each': new Builtin('for-each', function(args, c) {
+    alert(Util.format(args));
     if (args.length < 2)
       throw IllegalArgumentCountError('for-each', 'at least', 2, args.length);
     var proc = Util.car(args);
+    if (proc instanceof Builtin) {
+      proc = proc.apply;
+    }
     var lists = Util.cdr(args);
     for (var i = 1; i < lists.length; i++) {
       if (lists[i].length != lists[0].length)
@@ -1037,6 +1045,9 @@ var ReservedSymbolTable = new Hash({
     if (args.length < 2)
       throw IllegalArgumentCountError('map', 'at least', 2, args.length);
     var proc = args[0];
+    if (proc instanceof Builtin) {
+      proc = proc.apply;
+    }
     var lists = Util.cdr(args);
     for (var i = 1; i < lists.length; i++) {
       if (lists[i].length != lists[0].length)
@@ -1245,6 +1256,7 @@ var Interpreter = Class.create({
     this.lineno = 0;
     this.histline = '';
     this.histprog = false;
+    this.helpid = 0;
     this.DEFAULT_PREFIX = '&gt;&nbsp;';
     this.CONTINUE_PREFIX = '<span class="continue">..&nbsp;</span>';
     this.prefix = this.DEFAULT_PREFIX;
@@ -1437,6 +1449,130 @@ function jscm_printBlock(text, className)
   span.addClassName('block');
   span.appendChild(document.createTextNode(text));
   jscm_printElement(span);
+}
+
+function jscm_printDisplay(text)
+{
+  var span = document.createElement('span');
+  span.addClassName('block');
+  span.appendChild(document.createTextNode(text));
+  REPL.buffer.push(span);
+}
+
+function jscm_printHelp(args)
+{
+  jscm_printElement();
+  REPL.helpid++;
+  var div = document.createElement('div');
+  div.addClassName('help');
+  if (args.length == 0) {
+    div.update(jscm_getHelp());
+  } else if (args.length == 1 && args[0].doc) {
+    div.update(jscm_getBuiltinHelp(args[0]));
+  }
+  $(Document.CONSOLE).appendChild(div);
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+function jscm_getHelp()
+{
+  var builtins = '<h2><span>BUILT-IN PROCEDURES</span></h2>' +
+    '<div class="builtinList" id="builtinList' + REPL.helpid + '">' +
+    '<p>' +
+      'To view documentation for a built-in procedure, use ' +
+      '<strong>(help <em>proc</em>)</strong> where ' +
+      '<strong><em>proc</em></strong> is the procedure to lookup.' +
+    '</p>' +
+    '<p>' +
+      'Enter <strong>(display-built-ins)</strong> to view a list of the ' +
+      '<strong>' + Builtin.instances + '</strong> ' +
+      'built-ins.' +
+    '</p>';
+  return '<h1><span>JS-SCHEME HELP</span> ' +
+    jscm_getToggleLinkFor('helpBody','helpMin') + '</h1><div class="helpBody">' +
+    '<div id="helpBody' + REPL.helpid + '">' +
+    '<p>Welcome to JS-SCHEME ' + JSScheme.version + '!</p>' +
+    '<p>' +
+      'This interpreter began as an extension of the one ' +
+      'described in the final chapter of ' +
+      '<a href="http://www.amazon.com/Seasoned-Schemer-Daniel-P-Friedman/dp/' +
+	     '026256100X">The Seasoned Schemer</a>.' +
+    '</p>' +
+    '<p>' +
+      'JS-SCHEME is written by <a href="http://www.eriksilkensen.com">Erik ' +
+      'Silkensen</a>.' +
+    '</p>' +
+    '<p>' +
+      'Visit the <a href="http://js-scheme.googlecode.com">Google Code</a> ' +
+      'page for more information.' +
+    '</p>' +
+    builtins +
+    '</div></div>';
+}
+
+function jscm_getBuiltinHelp(proc)
+{
+  return '<h1><span>JS-SCHEME HELP</span> ' +
+    '<span class="syntax"><strong>(' + proc.name +
+    '</strong>' + (proc.argdoc ? ' <em>' + proc.argdoc + '</em>' : '') +
+    '<strong>)</strong></span>' +
+    jscm_getToggleLinkFor('helpBody', 'helpMin')+'</h1><div class="helpBody">' +
+    '<div id="helpBody' + REPL.helpid + '">' + proc.doc + '</div></div>';
+}
+
+function jscm_printBuiltinsHelp() {
+  jscm_printElement();
+  REPL.helpid++;
+  var div = document.createElement('div');
+  div.addClassName('help');
+  div.update(jscm_getBuiltinsHTML());
+  $(Document.CONSOLE).appendChild(div);
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+function jscm_getHelpList(keys, ITEMS_PER_COL, test) {
+  if (test === undefined)
+    test = function(arg) { return true; };
+  var tab = 0;
+  var open = true;
+  var list = '<ul>';
+  for (var i = 0; i < keys.length; i++) {
+    if (test(keys[i])) {
+      tab++;
+      if (!open)
+	list += '<ul>';
+      open = true;
+      list += '<li>' + keys[i] + '</li>';
+      if (tab > ITEMS_PER_COL - 1 && tab % ITEMS_PER_COL == 0) {
+	open = false;
+	list += '</ul>';
+      }
+    }
+  }
+  list += (open ? '</ul>' : '');
+  return list;
+}
+
+function jscm_getBuiltinsHTML() {
+  var ITEMS_PER_COL = 30;
+  var keys = ReservedSymbolTable.keys();
+  var isBuiltin = function(key) {
+    return ReservedSymbolTable.get(key) instanceof Builtin;
+  };
+  return '<h1><span>BUILTIN-PROCEDURES</span>' +
+    jscm_getToggleLinkFor('builtinList', 'helpMin') +
+    '</h1><div class="helpBody">' +
+    '<div class="builtinList" id="builtinList' + REPL.helpid + '">' +
+    '<div>' + jscm_getHelpList(keys, ITEMS_PER_COL, isBuiltin) + '</div></div>' +
+    '<div style="clear:both;"></div></div>';
+}
+
+function jscm_getToggleLinkFor(what, cssClass, text)
+{
+  if (text == undefined) text = '[toggle]';
+    cssClass = cssClass ? (' class="' + cssClass + '" ') : '';
+  return '<a href="#" onclick="$(\'' + what + REPL.helpid + '\').toggle();' +
+    'return false;"' + cssClass + '>' + text + '</a>';
 }
 
 function jscm_onkeydown(e)
