@@ -3,7 +3,7 @@
     <title>js-scheme | a Scheme interpreter written in JavaScript</title>
     <link rel="stylesheet" type="text/css" href="js-scheme.css?r=1" /> 
     <script type="text/javascript" src="prototype.js"> </script>
-    <script type="text/javascript" src="js-scheme.js?r=2"> </script>
+    <script type="text/javascript" src="js-scheme.js?r=3"> </script>
   </head>
   <body>
     <div id="console">
@@ -26,7 +26,7 @@
 	<span class="error">Oops!  JavaScript is disabled.</span>
       </noscript>
     </div>
-    <form onsubmit="return repl();">
+    <form onsubmit="jscm_repl(); return false;">
       <span id="prefix">&gt;&nbsp;</span><input type="text" name="input" id="input" />
     </form>
     <!--[if IE]>
