@@ -17,7 +17,7 @@
 var JSScheme = {
   author: 'Erik Silkensen',
   version: '0.2b r1, CPS',
-  date: '17 Aug 2008'
+  date: '22 Aug 2008'
 };
 
 var  Document = {
