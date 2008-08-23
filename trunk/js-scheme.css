@@ -30,7 +30,7 @@ a:hover { background: #def4f7; }
 
 .title { color: navy; }
 
-.intro {
+.intro p {
     margin: 5px 0 5px 0;
     font-size: 12px;
 }
