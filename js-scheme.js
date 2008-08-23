@@ -668,11 +668,16 @@ var ReservedSymbolTable = new Hash({
       if (args.length != 1) {
 	throw IllegalArgumentCountError('call-with-current-continuation',
 	  'exactly', 1, args.length);
-      } else if (typeof args[0] != 'function') {
-	throw IllegalArgumentTypeError('call-with-current-continuation',
-	  args[0], 1);
       }
-      args[0]([function(val) {
+      var proc = args[0];
+      if (proc instanceof Builtin) {
+	proc = proc.apply;
+      }
+      if (typeof proc != 'function') {
+	throw IllegalArgumentTypeError('call-with-current-continuation',
+	  proc, 1);
+      }
+      proc([function(val) {
 		 c(val[0]);
 		 throw new Escape();
 	       }], c);
@@ -872,12 +877,14 @@ var ReservedSymbolTable = new Hash({
     'computed for the promise, then that value is computed, memoized, and ' +
     'returned.', 'promise'),
   'for-each': new Builtin('for-each', function(args, c) {
-    alert(Util.format(args));
     if (args.length < 2)
       throw IllegalArgumentCountError('for-each', 'at least', 2, args.length);
     var proc = Util.car(args);
     if (proc instanceof Builtin) {
       proc = proc.apply;
+    }
+    if (typeof proc != 'function') {
+      throw IllegalArgumentTypeError('for-each', proc, 1);
     }
     var lists = Util.cdr(args);
     for (var i = 1; i < lists.length; i++) {
@@ -1048,6 +1055,9 @@ var ReservedSymbolTable = new Hash({
     if (proc instanceof Builtin) {
       proc = proc.apply;
     }
+    if (typeof proc != 'function') {
+      throw IllegalArgumentTypeError('map', proc, 1);
+    }
     var lists = Util.cdr(args);
     for (var i = 1; i < lists.length; i++) {
       if (lists[i].length != lists[0].length)
@@ -1059,10 +1069,6 @@ var ReservedSymbolTable = new Hash({
       for (var k = 0; k < lists.length; k++) {
 	pargs.push(lists[k][j]);
       }
-      if (proc instanceof Builtin)
-	proc = proc.apply;
-      if (typeof proc != 'function')
-	throw IllegalArgumentTypeError('map', proc, 1);
       proc.apply(this, [pargs, function(val) {
 		   res.push(val);
 		 }]);
@@ -1125,7 +1131,7 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentTypeError('expt', args[1], 2);
     c(Math.pow(args[0], args[1]));
   }, 'Returns <em>a</em> to the power of <em>b</em>.', 'a b'),
-  'quote': new Builtin('quote', function(e, env, c) {
+  'quote': new SpecialForm('quote', function(e, env, c) {
     return function(args, c) {
       if (args.length != 1)
 	throw IllegalArgumentCountError('quote', 'exactly', 1, args.length);
