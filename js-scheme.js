@@ -1,6 +1,6 @@
 /*******************************************************************************
  JS-SCHEME - a Scheme interpreter written in JavaScript
- (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.2
+ (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.2.2
 
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software
@@ -16,8 +16,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.2b r1, CPS',
-  date: '22 Aug 2008'
+  version: '0.2.2b r1, CPS',
+  date: '25 Aug 2008'
 };
 
 var  Document = {
@@ -168,7 +168,7 @@ var Util = new (Class.create({
       for (var i = 0; i < cpy.length; i++) {
 	cpy[i] = cpy[i].toString();
       }
-      return Object.inspect(str2).gsub('[\\[]', '(').gsub(']',')').gsub(',','')
+      return Object.inspect(cpy).gsub('[\\[]', '(').gsub(']',')').gsub(',','')
 	.gsub('\'','');
     } else {
       return Object.inspect(expr).gsub('[\\[]','(').gsub(']',')').gsub(',','')
