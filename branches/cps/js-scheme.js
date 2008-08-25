@@ -166,7 +166,7 @@ var Util = new (Class.create({
     } else if (Object.isArray(expr) && expr[0] instanceof Pair) {
       var cpy = expr.clone();
       for (var i = 0; i < cpy.length; i++) {
-	cpy[i] = cp[i].toString();
+	cpy[i] = cpy[i].toString();
       }
       return Object.inspect(str2).gsub('[\\[]', '(').gsub(']',')').gsub(',','')
 	.gsub('\'','');
