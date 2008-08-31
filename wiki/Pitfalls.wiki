@@ -11,7 +11,7 @@
   * *P*  -  Pass
   * _?_  -  Not tested
 
-== Tests that Pass (9/20) ==
+== Tests that Pass ==
 
   * *1.3* 
 {{{
