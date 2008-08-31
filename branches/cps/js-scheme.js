@@ -16,8 +16,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.3 r2, CPS',
-  date: '26 Aug 2008'
+  version: '0.3b r1, CPS',
+  date: '31 Aug 2008'
 };
 
 var  Document = {
@@ -187,6 +187,15 @@ var Util = new (Class.create({
       ans = op(ans, this.getNumber(args[i]));
     }
     return ans;
+  },
+  validateNumberArg: function(proc, args) {
+    if (args.length != 1) {
+      throw IllegalArgumentCountError(proc, 'exactly', 1, args.length);
+    } else if (!Util.isNumber(args[0])) {
+      throw IllegalArgumentTypeError(proc, args[0], 1);
+    } else {
+      return true;
+    }
   }
 }))();
 
@@ -526,11 +535,15 @@ var Actions = {
 		  if (proc instanceof Builtin) {
 		    proc = proc.apply;
 		  }
-		  if (typeof proc != 'function') {
-		    throw new JSError('The object ' + Util.format(proc) +
-				      ' is not applicable.', 'Type');
-		  }
 		  jscm_evlis(Util.cdr(expr), env, function(args) {
+			       /* evaluate the args before checking the type of
+				* proc; this allows pitfall test 2.1 to pass!!
+				*/
+			       if (typeof proc != 'function') {
+				 throw new JSError('The object ' +
+				   Util.format(proc) +
+				     ' is not applicable.', 'Type');
+			       }
 			       proc(args, c);
 			     });
 		}
@@ -586,6 +599,10 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentTypeError('abs', args[0], 1);
     c(Math.abs(args[0]));
   }, 'Returns the absolute value of <em>number</em>.', 'number'),
+  'acos': new Builtin('acos', function(args, c) {
+    Util.validateNumberArg('acos', args);
+    c(Math.acos(args[0]));
+  }, 'Returns the arc cosine (in radians) of <em>z</em>.', 'z'),
   'alert': new Builtin('alert', function(args, c) {
     c(alert(Util.format(args[0])));
   }, 'Calls the native JavaScript function alert(<em>obj</em>);', 'obj'),
@@ -602,10 +619,8 @@ var ReservedSymbolTable = new Hash({
    '<p>Note: <b>#f</b> is the <u>only</u> false value in conditional ' +
    'expressions.</p>', 'obj<sub>1</sub> . obj<sub>n</sub>'),
   'append': new Builtin('append', function(args, c) {
-    var res = undefined;
-    if (args.length == 0) {
-      res = [];
-    } else if (args.length == 1) {
+    var res = [];
+    if (args.length == 1) {
       res = args[0];
     } else {
       for (var i = 0; i < args.length; i++) {
@@ -634,7 +649,15 @@ var ReservedSymbolTable = new Hash({
       proc = proc.apply;
     c(proc(args[1]));
   }, 'Applies <em>proc</em> to elements of the list <em>args</em>.',
-     'proc args'),
+    'proc args'),
+  'asin': new Builtin('asin', function(args, c) {
+    Util.validateNumberArg('asin', args);
+    c(Math.asin(args[0]));
+  }, 'Returns the arc sin (in radians) of <em>z</em>.', 'z'),
+  'atan': new Builtin('atan', function(args, c) {
+    Util.validateNumberArg('atan', args);
+    c(Math.atan(args[0]));
+  }, 'Returns the arc tangent (in radians) of <em>z</em>.', 'z'),
   'atom?': new Builtin('atom?', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('atom?', 'exactly', 1, args.length);
@@ -690,6 +713,46 @@ var ReservedSymbolTable = new Hash({
     c(ans);
   }, '<p>Returns the contents of the car field of <em>pair</em>.</p>' +
     '<p>Note: it is an error to take the car of the empty list.</p>', 'pair'),
+  'case': new SpecialForm('case', function(e, env, c) {
+    if (e.length < 3) {
+      throw IllegalArgumentCountError('case', 'at least', 2, e.length - 1);
+    }
+      var key = undefined;
+      var lines = Util.cdr(Util.cdr(e));
+      var jscm_evcase = function(args) {
+	if (Util.isNull(args)) {
+	  c(undefined);
+	  return;
+	}
+	var keyset = args[0][0];
+	var expr = [Util.cons(Tokens.LAMBDA, Util.cons([], Util.cdr(args[0])))];
+	if (keyset.toString().toLowerCase() === 'else') {
+	  jscm_eval(expr, env, c);
+	} else {
+	  for (var i = 0; i < keyset.length; i++) {
+	    if (keyset[i] == key) {
+	      jscm_eval(expr, env, c);
+	      return;
+	    }
+	  }
+	  jscm_evcase(Util.cdr(args));
+	}
+      };
+      jscm_eval(e[1], env, function(val) {
+	key = val;
+	jscm_evcase(lines);
+      });
+  },'<p>Each <em>clause</em> should be of the form: <br /> ' +
+    '((datum<sub>1</sub> . datum<sub>n</sub>) expression<em>(s)</em>)</p>' +
+    '<p>A <code>case</code> expression is evaluated as follows. ' +
+    '<em>Key</em> is evaluated and its result is compared against each ' +
+    '<em>datum</em>.  If the result of evaluating <em>key</em> is equivalent ' +
+    ' (in the sense of <code>eqv?</code>) to a <em>datum</em>, then the ' +
+    'expressions in the corresponding <em>clause</em> are evaluated from ' +
+    'left to right and the result of the last expression in the ' +
+    '<em>clause</em> is returned as the result of the <code>case</code> ' +
+    'expression.  <code>Else</code> may be used as a <em>datum</em>, as in ' +
+    '<code>cond</code>.</p>', 'key clause<sub>1</sub> . clause<sub>n</sub>'),
   'cdr': new Builtin('cdr', function(args, c) {
     var ans = undefined;
     if (args.length != 1) {
@@ -718,8 +781,21 @@ var ReservedSymbolTable = new Hash({
     throw new Escape();
   }, 'Clears the console display area.'),
   'cond': new SpecialForm('cond', function(e, env, c) {
-    jscm_evcon(Util.cdr(e), env, c);
-  },'<p>Each <em>clause</em> is a pair where the car is a <em>test</em> ' +
+    var jscm_evcon = function(lines) {
+      if (Util.isNull(lines)) {
+	c(undefined);
+      } else {
+	jscm_eval(lines[0][0], env, function(test) {
+	  if (test) {
+	    jscm_eval(lines[0][1], env, c);
+	  } else {
+	    jscm_evcon(Util.cdr(lines), env, c);
+	  }
+	});
+      }
+    };
+    jscm_evcon(Util.cdr(e));
+  }, '<p>Each <em>clause</em> is a pair where the car is a <em>test</em> ' +
     'expression, and the cdr is the value of the cond expresion if the test ' +
     'evaluates to a true value.</p><p>The value of the first clause whose ' +
     'test is true is the value of the cond expression.</p>',
@@ -736,13 +812,9 @@ var ReservedSymbolTable = new Hash({
     'and whose cdr is <em>obj<sub>2</sub></em>.',
     'obj<sub>1</sub> obj<sub>2</sub>'),
   'cos': new Builtin('cos', function(args, c) {
-    if (args.length != 1)
-      throw IllegalArgumentCountError('cos', 'exactly', 1, args.length);
-    if (!Util.isNumber(args[0]))
-      throw IllegalArgumentTypeError('cos', args[0], 1);
+    Util.validateNumberArg('cos', args);
     c(Math.cos(args[0]));
-  }, 'Returns the cosine (in radians) of <em>number</em> using the JavaScript' +
-    ' <strong>Math.cos()</strong> function.', 'number'),
+  }, 'Returns the cosine (in radians) of <em>z</em>.', 'z'),
   'define': new SpecialForm('define', function(e, env, c) {
     var name = e[1];
     if (Util.isAtom(name)) {
@@ -843,19 +915,66 @@ var ReservedSymbolTable = new Hash({
     '</p><p>For example,</p><p>(eval \'(+ 2 2)) => 4<br />(eval "(+ 2 2)") =>' +
     ' 4</p>', 'expression'),
   'even?': new Builtin('even?', function(args, c) {
-    if (args.length != 1)
-      throw IllegalArgumentCountError('even?', 'exactly', 1, args.length);
-    if (!Util.isNumber(args[0]))
-      throw IllegalArgumentTypeError('even?', args[0], 1);
+    Util.validateNumberArg('even?', args);
     c(args[0] % 2 == 0);
   }, 'Returns #t if <em>n</em> is even, and #f otherwise.', 'n'),
   'eq?': new Builtin('eq?', function(args, c) {
     if (args.length != 2)
       throw IllegalArgumentCountError('eq?', 'exactly', 2, args.length);
-    c(args[0] == args[1] || Util.isNull(args[0]) && Util.isNull(args[1]));
+    if (Util.isNull(args[0])) {
+      c(Util.isNull(args[1]));
+    } else if (Util.isNull(args[1])) {
+      c(false);
+    } else {
+      c(args[0] == args[1]);
+    }
   }, '<p>Returns #t if <em>obj<sub>1</sub></em> is "equal" to ' +
     '<em>obj<sub>2</sub></em>.</p><p>This is currently determined using the' +
     ' JavaScript <strong>==</strong> operator.</p>',
+    'obj<sub>1</sub> obj<sub>2</sub>'),
+  'equal?': new Builtin('equal?', function(args, c) {
+    if (args.length != 2) {
+      throw IllegalArgumentCountError('equal?', 'exactly', 2, args.length);
+    }
+    var equal = function(obj1, obj2) {
+      if (obj1 instanceof JSString) {
+	obj1 = obj1.string;
+      } else if (obj2 instanceof JSString) {
+	obj2 = obj2.string;
+      }
+      if (Util.isNull(obj1) && Util.isNull(obj2)) {
+	c(true);
+	return true;
+      } else if (Util.isAtom(obj1) && Util.isAtom(obj2)) {
+	c(obj1 == obj2);
+	return obj1 == obj2;
+      } else {
+	if (obj1.length == obj2.length) {
+	  for (var i = 0; i < obj1.length; i++) {
+	    if (!equal(obj[i], obj2[i])) {
+	      c(false);
+	      return false;
+	    }
+	  }
+	  c(true);
+	  return true;
+	} else {
+	  c(false);
+	  return false;
+	}
+      }
+    };
+    equal(args[0], args[1]);
+  }, 'Returns #t if <em>obj<sub1</sub></em> is equal to <em>obj<sub>2</sub>' +
+    '</em>.  If the objects are lists, they will be compared recursively. ' +
+    'As a rule of thumb, if the objects display the same, they are probably ' +
+    '"equal."', 'obj<sub>1</sub> obj<sub>2</sub>'),
+  'eqv?': new Builtin('eqv?', function(args, c) {
+    if (args.length != 2)
+      throw IllegalArgumentCountError('eqv?', 'exactly', 2, args.length);
+    c(args[0] === args[1] || Util.isNull(args[0]) && Util.isNull(args[1]));
+  }, '<p>Currently returns the exact same value as <code>(eq? <em>obj<sub>1' +
+    '</sub></em> <em>obj<sub>2</sub></em>)</code></p>',
     'obj<sub>1</sub> obj<sub>2</sub>'),
   'expt': new Builtin('expt', function(args, c) {
     if (args.length != 2)
@@ -914,31 +1033,49 @@ var ReservedSymbolTable = new Hash({
     throw new Escape(jscm_printHelp, args);
   }, 'Displays help information for JS-SCHEME.'),
   'if': new SpecialForm('if', function(e, env, c) {
-    jscm_evif(Util.cdr(e), env, function(val) {
-		c(val);
-	      });
+    var args = Util.cdr(e);
+    jscm_eval(args[0], env, function(test) {
+      if (test) {
+	jscm_eval(args[1], env, c);
+      } else if (args.length < 3) {
+	c(undefined);
+      } else {
+	jscm_eval(args[2], env, c);
+      }
+    });
   }, 'An <strong>if</strong> expression ', 'test consequent [alternate]'),
   'lambda': new SpecialForm('lambda', function(e, env, c) {
-    if (e[1].length != e[1].uniq().length)
+    if (e.length < 3) {
       throw new JSError(Util.format(e), "Ill-formed special form", false);
-    c(function(args, k) {
-      env = env.extension();
-      if (e[1].length != args.length)
-	throw IllegalArgumentCountError('#[compound-procedure]', 'exactly',
-					e[1].length, args.length);
-      var bargs = [];
-      for (var i = 0; i < args.length; i++) {
-	bargs[i] = new Box(args[i]);
+    }
+    if (Util.isAtom(e[1])) {
+      c(function (args, k) {
+	  env = env.extension();
+	  env.extend(e[1], new Box(args));
+	  jscm_beglis(Util.cdr(Util.cdr(e)), env, k);
+	});
+    } else if (Object.isArray(e[1])) {
+      if (e[1].length != e[1].uniq().length) {
+	throw new JSError(Util.format(e), "Ill-formed special form", false);
       }
-      env.multiExtend(e[1], bargs);
-      jscm_beglis(Util.cdr(Util.cdr(e)), env, function(val) {
-		    k(val);
-		  });
-    });
-  }, 'Evaluates to a procedure.  Currently, the formals <u>must</u> be in ' +
-    'the form of a list. <p><br />((lambda (a) (+ a 1)) 2) ==> 3 ' +
-    '; procedure that adds 1 to a</p>',
-    '(formals) body'),
+      c(function(args, k) {
+	  env = env.extension();
+	  if (e[1].length != args.length)
+	    throw IllegalArgumentCountError('#[compound-procedure]', 'exactly',
+					    e[1].length, args.length);
+	  var bargs = [];
+	  for (var i = 0; i < args.length; i++) {
+	    bargs[i] = new Box(args[i]);
+	  }
+	  env.multiExtend(e[1], bargs);
+	  jscm_beglis(Util.cdr(Util.cdr(e)), env, k);
+	});
+    }
+  }, 'Evaluates to a procedure.  Currently, there are two possible forms for ' +
+    '&lt;formals&gt;:<ul style="margin-top:5px;"><li>(variable<sub>1</sub> ...) <p>The procedure takes'+
+    ' a fixed number of arguments.</p></li><li>variable<p>The procedure takes '+
+    'any number of arguments, stored in a list with the name <em>variable' +
+    '</em>.</p></li></ul>', '&lt;formals&gt; body'),
   'length': new Builtin('length', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('length', 'exactly', 1, args.length);
@@ -1085,13 +1222,8 @@ var ReservedSymbolTable = new Hash({
   '<em>k</em> elements of <em>list</em> It is an error if <em>list</em> ' +
   'has fewer than <em>k</em> elements.', 'list k'),
   'log': new Builtin('log', function(args, c) {
-    if (args.length != 1) {
-      throw IllegalArgumentCountError('log', 'exactly', 1, args.length);
-    } else if (!Util.isNumber(args[0])) {
-      throw IllegalArgumentTypeError('log', args[0], 1);
-    } else {
+    Util.validateNumberArg('log', args);
     c(Math.log(args[0]) / Math.log(2));
-    }
   }, 'Returns the natural logarithm (base 2) of <em>z</em>.', 'z'),
  'map': new Builtin('map', function(args, c) {
     if (args.length < 2)
@@ -1143,10 +1275,7 @@ var ReservedSymbolTable = new Hash({
   }, 'Returns #t if <em>obj</em> is a number, and returns #f otherwise.',
     'obj'),
   'odd?': new Builtin('odd?', function(args, c) {
-    if (args.length != 1)
-      throw IllegalArgumentCountError('odd?', 'exactly', 1, args.length);
-    if (!Util.isNumber(args[0]))
-      throw IllegalArgumentTypeError('odd?', args[0], 1);
+    Util.validateNumberArg('odd?', args);
     c(args[0] % 2 != 0);
   }, 'Returns #t if <em>n</em> is odd, and returns #f otherwise.', 'n'),
  'or': new Builtin('or', function(args, c) {
@@ -1167,6 +1296,12 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentCountError('pair?', 'exactly', 1, args.length);
     c(!Util.isNull(args[0]) && !Util.isAtom(args[0]));
   }, 'Returns #t if <em>obj</em> is a pair, and returns #f otherwise.', 'obj'),
+  'procedure?': new Builtin('procedure?', function(args, c) {
+    if (args.length != 1) {
+      throw IllegalArgumentCountError('procedure?', 'exactly', 1, args.length);
+    }
+    c(typeof args[0] == 'function');
+  }, 'Returns #t if <em>obj</em> is a procedure.', 'obj'),
   'quote': new SpecialForm('quote', function(e, env, c) {
     return function(args, c) {
       if (args.length != 1)
@@ -1207,10 +1342,7 @@ var ReservedSymbolTable = new Hash({
     '0 is used. Returns the original value that <em>variable</em> referred to.',
     'variable [expression]'),
   'sin': new Builtin('sin', function(args, c) {
-    if (args.length != 1)
-      throw IllegalArgumentCountError('sin', 'exactly', 1, args.length);
-    if (!Util.isNumber(args[0]))
-      throw IllegalArgumentTypeError('sin', args[0], 1);
+    Util.validateNumberArg('sin', args);
     c(Math.cos(args[0]));
   }, 'Returns the sine (in radians) of <em>number</em> using the JavaScript ' +
     '<strong>Math.sin()</strong> function.', 'number'),
@@ -1225,18 +1357,11 @@ var ReservedSymbolTable = new Hash({
   }, 'Returns the square root of <em>z</em>, or <code>NaN</code> if ' +
     '<em>z</em> is less than 0.', 'z'),
   'tan': new Builtin('tan', function(args, c) {
-    if (args.length != 1)
-      throw IllegalArgumentCountError('tan', 'exactly', 1, args.length);
-    if (!Util.isNumber(args[0]))
-      throw IllegalArgumentTypeError('tan', args[0], 1);
+    Util.validateNumberArg('tan', args);
     c(Math.tan(args[0]));
-  }, 'Returns the tangent (in radians) of <em>number</em> using the ' +
-    'JavaScript <strong>Math.tan()</strong> function.', 'number'),
+  }, 'Returns the tangent (in radians) of <em>z</em>.', 'z'),
   'zero?': new Builtin('zero?', function(args, c) {
-    if (args.length != 1)
-      throw IllegalArgumentCountError('zero?', 'exactly', 1, args.length);
-    if (!Util.isNumber(args[0]))
-      throw IllegalArgumentTypeError('zero?', args[0], 1);
+    Util.validateNumberArg('zero?', args);
     c(args[0] === 0);
   }, 'Returns #t if <em>number</em> is 0, and returns #f otherwise.', 'number'),
   '=': new Builtin('=', function(args, c) {
@@ -1419,30 +1544,6 @@ function jscm_evlis(arglis, env, c)
 			   });
 	       });
   }
-}
-
-function jscm_evcon(lines, env, c)
-{
-  jscm_eval(lines[0][0], env, function(test) {
-	      if (test) {
-		jscm_eval(lines[0][1], env, c);
-	      } else {
-		jscm_evcon(Util.cdr(lines), env, c);
-	      }
-	    });
-}
-
-function jscm_evif(args, env, c)
-{
-  jscm_eval(args[0], env, function(test) {
-	      if (test) {
-		jscm_eval(args[1], env, c);
-	      } else if (args.length < 3) {
-		c(undefined);
-	      } else {
-		jscm_eval(args[2], env, c);
-	      }
-	    });
 }
 
 function jscm_expressionToAction(expr)
