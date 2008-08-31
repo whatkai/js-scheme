@@ -35,7 +35,7 @@
 
 == Tests that Fail (3/20) ==
 
-The first two tests that fail deal with letrec.  Test 7.2 _should_ pass though - as it is the exact same test as 7.1, only in reverse order, and 7.2 fails because the JavaScript stack overflows.  
+The first two tests that fail deal with letrec.  Test 7.2 _should_ pass though - as it is the exact same test as 7.1, only in reverse order, and 7.2 fails because the JS stack overflows.  
 
 == Tests that Haven't Been Tested (7/20) ==
 
