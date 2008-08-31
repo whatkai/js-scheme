@@ -1,6 +1,6 @@
 /*******************************************************************************
  JS-SCHEME - a Scheme interpreter written in JavaScript
- (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.2.2
+ (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.3
 
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software
@@ -16,8 +16,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.2.2b r1, CPS',
-  date: '25 Aug 2008'
+  version: '0.3 r2, CPS',
+  date: '26 Aug 2008'
 };
 
 var  Document = {
@@ -39,6 +39,7 @@ var Tokens = {
   DELAY: 'delay',
   DOT: '.',
   ELSE: 'else',
+  EVAL: 'eval',
   HEX: '^#x[0-9a-fA-F]+$',
   IDENTIFIER: '^[^\\\',\\"\\s\\(\\)]+$',
   IF: 'if',
@@ -58,20 +59,6 @@ var Tokens = {
   SPACE: ' ',
   STRING: '^[\\"](([^\\"\\\\]|([\\\\].))*)[\\"]'
 };
-
-var ActionTokens = { };
-ActionTokens[Tokens.QUOTE] = true;
-ActionTokens[Tokens.LAMBDA] = true;
-ActionTokens[Tokens.LET] = true;
-ActionTokens[Tokens.LET_STAR] = true;
-ActionTokens[Tokens.LETREC] = true;
-ActionTokens[Tokens.SET] = true;
-ActionTokens[Tokens.COND] = true;
-ActionTokens[Tokens.IF] = true;
-ActionTokens[Tokens.DEFINE] = true;
-ActionTokens[Tokens.BEGIN] = true;
-ActionTokens[Tokens.DELAY] = true;
-ActionTokens[Tokens.EVAL] = true;
 
 var Util = new (Class.create({
   initialize: function()
@@ -286,7 +273,12 @@ var Environment = Class.create({
     name = name.toLowerCase();
     if (this.table.get(name) === undefined) {
       if (this.parent === undefined) {
-	throw UnboundVariableError(name);
+	var reserved = ReservedSymbolTable.get(name);
+	if (reserved === undefined) {
+	  throw UnboundVariableError(name);
+	} else {
+	  return new Box(reserved);
+	}
       } else {
 	return this.parent.lookup(name);
       }
@@ -340,12 +332,13 @@ var History = Class.create({
 });
 
 var JSError = Class.create({
-  initialize: function(message, type) {
+  initialize: function(message, type, isPrefix) {
     this.message = message;
     this.type = type === undefined ? '' : type;
+    this.isPrefix = isPrefix === undefined ? true : isPrefix;
   },
   toString: function() {
-    return this.type + 'Error: ' + this.message;
+    return this.type + (this.isPrefix ? 'Error' : '') + ': ' + this.message;
   }
 });
 
@@ -527,17 +520,20 @@ var Actions = {
   APPLICATION: function(expr, env, c)
   {
     jscm_eval(Util.car(expr), env, function(proc) {
-		jscm_evlis(Util.cdr(expr), env, function(args) {
-			     if (proc instanceof Builtin) {
-			       proc = proc.apply;
-			     }
-			     if (typeof proc != 'function') {
-			       throw new JSError('The object ' +
-						 Util.format(proc) +
-						 ' is not applicable.', 'Type');
-			     }
-			     proc(args, c);
-			   });
+		if (proc instanceof SpecialForm) {
+		  proc.apply(expr, env, c);
+		} else {
+		  if (proc instanceof Builtin) {
+		    proc = proc.apply;
+		  }
+		  if (typeof proc != 'function') {
+		    throw new JSError('The object ' + Util.format(proc) +
+				      ' is not applicable.', 'Type');
+		  }
+		  jscm_evlis(Util.cdr(expr), env, function(args) {
+			       proc(args, c);
+			     });
+		}
 	      });
   },
   CONST: function(expr, env, c)
@@ -547,8 +543,6 @@ var Actions = {
       c(Util.getNumber(exprl));
     } else if (Util.isString(expr)) {
       c(Util.getString(expr));
-    } else if (ReservedSymbolTable.get(exprl) != undefined) {
-      c(ReservedSymbolTable.get(exprl));
     } else {
       throw new JSError(expr + " not recognized as CONST", "Value");
     }
@@ -556,10 +550,6 @@ var Actions = {
   IDENTIFIER: function(expr, env, c)
   {
     c(env.lookup(expr.toLowerCase()).unbox());
-  },
-  getReserved: function(key)
-  {
-    return ReservedSymbolTable.get(key.toLowerCase()).apply;
   }
 };
 
@@ -679,7 +669,7 @@ var ReservedSymbolTable = new Hash({
       }
       proc([function(val) {
 		 c(val[0]);
-		 throw new Escape();
+		 //throw new Escape();
 	       }], c);
   }, '<p>Calls <em>proc</em> with the current continuation.</p>' +
     '<p>This interpreter is written in CPS; the continuation object is ' +
@@ -820,7 +810,7 @@ var ReservedSymbolTable = new Hash({
      'variable [expression]', 'variable [expression]'),
   'delay': new SpecialForm('delay', function(e, env, c) {
     if (e.length == 1)
-      throw 'Ill-formed special form: ' + Util.format(e);
+      throw new JSError(Util.format(e), 'Ill-formed special form', false);
     c(new Promise(e[1], env));
   }, 'Returns a <em>promise</em> which at some point in the future may be ' +
     'asked (by the <strong>force</strong> procedure) to evaluate ' +
@@ -867,6 +857,15 @@ var ReservedSymbolTable = new Hash({
     '<em>obj<sub>2</sub></em>.</p><p>This is currently determined using the' +
     ' JavaScript <strong>==</strong> operator.</p>',
     'obj<sub>1</sub> obj<sub>2</sub>'),
+  'expt': new Builtin('expt', function(args, c) {
+    if (args.length != 2)
+      throw IllegalArgumentCountError('expt', 'exactly', 1, args.length);
+    if (!Util.isNumber(args[0]))
+      throw IllegalArgumentTypeError('expt', args[0], 1);
+    if (!Util.isNumber(args[1]))
+      throw IllegalArgumentTypeError('expt', args[1], 2);
+    c(Math.pow(args[0], args[1]));
+  }, 'Returns <em>a</em> to the power of <em>b</em>.', 'a b'),
   'force': new Builtin('force', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('force', 'exactly', 1, args.length);
@@ -921,7 +920,7 @@ var ReservedSymbolTable = new Hash({
   }, 'An <strong>if</strong> expression ', 'test consequent [alternate]'),
   'lambda': new SpecialForm('lambda', function(e, env, c) {
     if (e[1].length != e[1].uniq().length)
-      throw "Ill-formed special form: " + Util.format(e);
+      throw new JSError(Util.format(e), "Ill-formed special form", false);
     c(function(args, k) {
       env = env.extension();
       if (e[1].length != args.length)
@@ -947,7 +946,7 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentTypeError('length', args[0], 1);
     c(args[0].length);
   }, 'Returns the length of <em>list</em>.', 'list'),
-  'let': new Builtin('let', function(e, env, c) {
+  'let': new SpecialForm('let', function(e, env, c) {
     var expr = Util.cons(Util.cons(Tokens.LAMBDA,
                                    Util.cons(Util.map(function(el) {
 			                         return Util.car(el);
@@ -967,7 +966,7 @@ var ReservedSymbolTable = new Hash({
     'value of the last expression is the value of the let expression.</p>' +
     '<p><em>body</em> is evaluated in an extended environment.</p>',
      'bindings body'),
-  'let*': new Builtin('let*', function(e, env, c) {
+  'let*': new SpecialForm('let*', function(e, env, c) {
     var help = function(e, b) {
       if (Util.isNull(e)) {
 	return [];
@@ -1048,6 +1047,52 @@ var ReservedSymbolTable = new Hash({
       }
     }
   }, 'Returns #t if <em>obj</em> is a list, and returns #f otherwise.', 'obj'),
+  'list-ref': new Builtin('list-ref', function(args, c) {
+    if (args.length != 2) {
+      throw IllegalArgumentCountError('list-ref', 'exactly', 2, args.length);
+    } else if (!Object.isArray(args[0])) {
+      throw IllegalArgumentTypeError('list-ref', args[0], 1);
+    } else if (!Util.isNumber(args[1])) {
+      throw IllegalArgumentTypeError('list-ref', args[1], 2);
+    } else if (args[0] < 0) {
+      throw IllegalArgumentError('The object ' + args[1] + ', passed as an ' +
+	'argument to list-ref, is not an index integer.');
+    } else if (args[1] >= args[0].length) {
+      throw IllegalArgumentError('The object ' + args[1] + ', passed as an ' +
+	'argument to list-ref, is not in the correct range.');
+    } else {
+      c(args[0][args[1]]);
+    }
+  }, 'Returns the <em>k</em>th element of <em>list</em>.  It is an error if ' +
+    '<em>list</em> has fewer than <em>k</em> elements.', 'list k'),
+  'list-tail': new Builtin('list-tail', function(args, c) {
+    if (args.length != 2) {
+      throw IllegalArgumentCountError('list-tail', 'exactly', 2, args.length);
+    } else if (!Object.isArray(args[0])) {
+      throw IllegalArgumentTypeError('list-tail', args[0], 1);
+    } else if (!Util.isNumber(args[1])) {
+      throw IllegalArgumentTypeError('list-tail', args[1], 2);
+    } else if (args[1] < 0) {
+      throw IllegalArgumentError('The object ' + args[1] + ', passed as an ' +
+	'argument to list-tail, is not an index integer.');
+    } else if (args[0].length < args[1]) {
+      throw IllegalArgumentError('The object ' + args[1] + ', passed as an ' +
+	'argument to list-tail, is not in the correct range.');
+    } else {
+      c(args[0].slice(args[1]));
+    }
+  }, 'Returns the sublist of <em>list</em> obtained by omitting the first ' +
+  '<em>k</em> elements of <em>list</em> It is an error if <em>list</em> ' +
+  'has fewer than <em>k</em> elements.', 'list k'),
+  'log': new Builtin('log', function(args, c) {
+    if (args.length != 1) {
+      throw IllegalArgumentCountError('log', 'exactly', 1, args.length);
+    } else if (!Util.isNumber(args[0])) {
+      throw IllegalArgumentTypeError('log', args[0], 1);
+    } else {
+    c(Math.log(args[0]) / Math.log(2));
+    }
+  }, 'Returns the natural logarithm (base 2) of <em>z</em>.', 'z'),
  'map': new Builtin('map', function(args, c) {
     if (args.length < 2)
       throw IllegalArgumentCountError('map', 'at least', 2, args.length);
@@ -1061,7 +1106,7 @@ var ReservedSymbolTable = new Hash({
     var lists = Util.cdr(args);
     for (var i = 1; i < lists.length; i++) {
       if (lists[i].length != lists[0].length)
-	throw "IllegalArgumentError: all of the lists must be the same length";
+	throw IllegalArgumentError("all of the lists must be the same length");
     }
     var res = [];
     for (var j = 0; j < lists[0].length; j++) {
@@ -1122,15 +1167,6 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentCountError('pair?', 'exactly', 1, args.length);
     c(!Util.isNull(args[0]) && !Util.isAtom(args[0]));
   }, 'Returns #t if <em>obj</em> is a pair, and returns #f otherwise.', 'obj'),
-  'expt': new Builtin('expt', function(args, c) {
-    if (args.length != 2)
-      throw IllegalArgumentCountError('expt', 'exactly', 1, args.length);
-    if (!Util.isNumber(args[0]))
-      throw IllegalArgumentTypeError('expt', args[0], 1);
-    if (!Util.isNumber(args[1]))
-      throw IllegalArgumentTypeError('expt', args[1], 2);
-    c(Math.pow(args[0], args[1]));
-  }, 'Returns <em>a</em> to the power of <em>b</em>.', 'a b'),
   'quote': new SpecialForm('quote', function(e, env, c) {
     return function(args, c) {
       if (args.length != 1)
@@ -1178,6 +1214,16 @@ var ReservedSymbolTable = new Hash({
     c(Math.cos(args[0]));
   }, 'Returns the sine (in radians) of <em>number</em> using the JavaScript ' +
     '<strong>Math.sin()</strong> function.', 'number'),
+  'sqrt': new Builtin('sqrt', function(args, c) {
+    if (args.length != 1) {
+      throw IllegalArgumentCountError('sqrt', 'exactly', 1, args.length);
+    } else if (!Util.isNumber(args[0])) {
+      throw IllegalArgumentTypeError('sqrt', args[0], 1);
+    } else {
+      c(Math.sqrt(args[0]));
+    }
+  }, 'Returns the square root of <em>z</em>, or <code>NaN</code> if ' +
+    '<em>z</em> is less than 0.', 'z'),
   'tan': new Builtin('tan', function(args, c) {
     if (args.length != 1)
       throw IllegalArgumentCountError('tan', 'exactly', 1, args.length);
@@ -1224,7 +1270,7 @@ var ReservedSymbolTable = new Hash({
     if (args.length == 0) {
       throw IllegalArgumentCountError('-', 'at least', 2, args.length);
     } else if (args.length == 1 && Util.isNumber(args[0])) {
-      c(arg[0] * -1);
+      c(args[0] * -1);
     } else if (args.length == 1) {
       throw IllegalArgumentTypeError('-', args[0], 1);
     } else {
@@ -1401,21 +1447,16 @@ function jscm_evif(args, env, c)
 
 function jscm_expressionToAction(expr)
 {
-  return Util.isAtom(expr) ? jscm_atomToAction(expr) : jscm_listToAction(expr);
-}
-
-function jscm_atomToAction(atom)
-{
-  atom = atom.toLowerCase();
-  return Util.isNumber(atom) || Util.isString(atom) ||
-    ReservedSymbolTable.get(atom) != undefined ?
-      Actions.CONST : Actions.IDENTIFIER;
-}
-
-function jscm_listToAction(list)
-{
-    return Util.isAtom(list[0]) && ActionTokens[list[0].toLowerCase()] ?
-      Actions.getReserved(list[0]) : Actions.APPLICATION;
+  if (Util.isAtom(expr)) {
+    expr = expr.toLowerCase();
+    if (Util.isNumber(expr) || Util.isString(expr)) {
+      return Actions.CONST;
+    } else {
+      return Actions.IDENTIFIER;
+    }
+  } else {
+    return Actions.APPLICATION;
+  }
 }
 
 function jscm_print(obj)
@@ -1551,6 +1592,7 @@ function jscm_getHelpList(keys, ITEMS_PER_COL, test) {
   var tab = 0;
   var open = true;
   var list = '<ul>';
+  keys.sort();
   for (var i = 0; i < keys.length; i++) {
     if (test(keys[i])) {
       tab++;

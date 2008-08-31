@@ -1,6 +1,6 @@
 /*******************************************************************************
  JS-SCHEME - a Scheme interpreter written in JavaScript
- (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.2.2
+ (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.3
 
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software
@@ -16,8 +16,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.2.2b r1',
-  date: '25 Aug 2008'
+  version: '0.3b r2',
+  date: '26 Aug 2008'
 };
 
 var  Document = {
@@ -39,6 +39,7 @@ var Tokens = {
   DELAY: 'delay',
   DOT: '.',
   ELSE: 'else',
+  EVAL: 'eval',
   HEX: '^#x[0-9a-fA-F]+$',
   IDENTIFIER: '^[^\\\',\\"\\s\\(\\)]+$',
   IF: 'if',
@@ -58,20 +59,6 @@ var Tokens = {
   SPACE: ' ',
   STRING: '^[\\"](([^\\"\\\\]|([\\\\].))*)[\\"]'
 };
-
-var ActionTokens = { };
-ActionTokens[Tokens.QUOTE] = true;
-ActionTokens[Tokens.LAMBDA] = true;
-ActionTokens[Tokens.LET] = true;
-ActionTokens[Tokens.LET_STAR] = true;
-ActionTokens[Tokens.LETREC] = true;
-ActionTokens[Tokens.SET] = true;
-ActionTokens[Tokens.COND] = true;
-ActionTokens[Tokens.IF] = true;
-ActionTokens[Tokens.DEFINE] = true;
-ActionTokens[Tokens.BEGIN] = true;
-ActionTokens[Tokens.DELAY] = true;
-ActionTokens[Tokens.EVAL] = true;
 
 var Util = new (Class.create({
   initialize: function()
@@ -97,6 +84,7 @@ var Util = new (Class.create({
   },
   cdr: function(list)
   {
+    return list.slice(1);
     var tmp = list.clone();
     tmp.shift();
     return tmp;
@@ -200,6 +188,15 @@ var Util = new (Class.create({
       ans = op(ans, this.getNumber(args[i]));
     }
     return ans;
+  },
+  validateNumberArg: function(proc, args) {
+    if (args.length != 1) {
+      throw IllegalArgumentCountError(proc, 'exactly', 1, args.length);
+    } else if (!Util.isNumber(args[0])) {
+      throw IllegalArgumentTypeError(proc, args[0], 1);
+    } else {
+      return true;
+    }
   }
 }))();
 
@@ -284,7 +281,12 @@ var Environment = Class.create({
     name = name.toLowerCase();
     if (this.table.get(name) === undefined) {
       if (this.parent === undefined) {
-	throw UnboundVariableError(name);
+	var reserved = ReservedSymbolTable.get(name);
+	if (reserved === undefined) {
+	  throw UnboundVariableError(name);
+	} else {
+	  return new Box(reserved);
+	}
       } else {
 	return this.parent.lookup(name);
       }
@@ -338,12 +340,13 @@ var History = Class.create({
 });
 
 var JSError = Class.create({
-  initialize: function(message, type) {
+  initialize: function(message, type, isPrefix) {
     this.message = message;
     this.type = type === undefined ? '' : type;
+    this.isPrefix = isPrefix === undefined ? true : isPrefix;
   },
   toString: function() {
-    return this.type + 'Error: ' + this.message;
+    return this.type + (this.isPrefix ? 'Error' : '') + ': ' + this.message;
   }
 });
 
@@ -525,15 +528,19 @@ var Actions = {
   APPLICATION: function(expr, env)
   {
     var proc = jscm_eval(Util.car(expr), env);
-    var args = jscm_evlis(Util.cdr(expr), env);
-    if (proc instanceof Builtin) {
-      proc = proc.apply;
+    if (proc instanceof SpecialForm) {
+      return proc.apply(expr, env);
+    } else {
+      if (proc instanceof Builtin) {
+	proc = proc.apply;
+      }
+      if (typeof proc != 'function') {
+	throw new JSError('The object ' + Util.format(proc) +
+			  ' is not applicable.', 'Type');
+      }
+      var args = jscm_evlis(Util.cdr(expr), env);
+      return proc(args);
     }
-    if (typeof proc != 'function') {
-      throw new JSError('The object ' + Util.format(proc) +
-			'is not applicable.', 'Type');
-    }
-    return proc(args);
   },
   CONST: function(expr, env)
   {
@@ -542,8 +549,6 @@ var Actions = {
       return Util.getNumber(exprl);
     } else if (Util.isString(expr)) {
       return Util.getString(expr);
-    } else if (ReservedSymbolTable.get(exprl) != undefined) {
-      return ReservedSymbolTable.get(exprl);
     } else {
       throw new JSError(expr + " not recognized as CONST", "Value");
     }
@@ -551,10 +556,6 @@ var Actions = {
   IDENTIFIER: function(expr, env)
   {
     return env.lookup(expr.toLowerCase()).unbox();
-  },
-  getReserved: function(key)
-  {
-    return ReservedSymbolTable.get(key.toLowerCase()).apply;
   }
 };
 
@@ -641,6 +642,9 @@ var ReservedSymbolTable = new Hash({
     return proc(args[1]);
   }, 'Applies <em>proc</em> to elements of the list <em>args</em>.',
      'proc args'),
+  'asin': new Builtin('asin', function(args) {
+
+  }, '', 'z'),
   'atom?': new Builtin('atom?', function(args) {
     if (args.length != 1)
       throw IllegalArgumentCountError('atom?', 'exactly', 1, args.length);
@@ -759,23 +763,22 @@ var ReservedSymbolTable = new Hash({
   }, 'Returns the cosine (in radians) of <em>number</em> using the JavaScript' +
     ' <strong>Math.cos()</strong> function.', 'number'),
   'define': new SpecialForm('define', function(e, env) {
+    if (e.length < 2 || e.length > 3) {
+      throw new JSError(Util.format(e), "Ill-formed special form", false);
+    }
     var name = e[1];
     if (Util.isAtom(name)) {
       name = name.toLowerCase();
       if (!Util.isIdentifier(name)) {
 	throw new JSWarning(name + ' may not be defined.');
       } else if (ReservedSymbolTable.get(name) != undefined) {
-	if (e.length == 2 || e.length == 3) {
-	  if (e.length == 2) {
-	    ReservedSymbolTable.set(name, 0);
-	    return name;
-	  } else {
-	    var val = jscm_eval(e[2], env);
-	    ReservedSymbolTable.set(name, val);
-	    return name;
-	  }
+	if (e.length == 2) {
+	  ReservedSymbolTable.set(name, 0);
+	  return name;
 	} else {
-	  throw IllegalArgumentCountError('define', '1 or', 2, e.length - 1);
+	  var val = jscm_eval(e[2], env);
+	  ReservedSymbolTable.set(name, val);
+	  return name;
 	}
       } else {
 	if (e.length == 2 || e.length == 3) {
@@ -821,7 +824,7 @@ var ReservedSymbolTable = new Hash({
      'variable [expression]', 'variable [expression]'),
   'delay': new SpecialForm('delay', function(e, env) {
     if (e.length == 1)
-      throw 'Ill-formed special form: ' + Util.format(e);
+      throw new JSError(Util.format(e), 'Ill-formed special form', false);
     return new Promise(e[1], env);
   }, 'Returns a <em>promise</em> which at some point in the future may be ' +
     'asked (by the <strong>force</strong> procedure) to evaluate ' +
@@ -862,11 +865,54 @@ var ReservedSymbolTable = new Hash({
   'eq?': new Builtin('eq?', function(args) {
     if (args.length != 2)
       throw IllegalArgumentCountError('eq?', 'exactly', 2, args.length);
-    return args[0] == args[1] || Util.isNull(args[0]) && Util.isNull(args[1]);
+    return args[0] === args[1] || Util.isNull(args[0]) && Util.isNull(args[1]);
   }, '<p>Returns #t if <em>obj<sub>1</sub></em> is "equal" to ' +
     '<em>obj<sub>2</sub></em>.</p><p>This is currently determined using the' +
-    ' JavaScript <strong>==</strong> operator.</p>',
+    ' JavaScript <strong>===</strong> operator.</p>',
     'obj<sub>1</sub> obj<sub>2</sub>'),
+  'equal?': new Builtin('equal?', function(args) {
+    if (args.length != 2) {
+      throw IllegalArgumentCountError('equal?', 'exactly', 2, args.length);
+    }
+    var equal = function(obj1, obj2) {
+      if (Util.isNull(obj1) && Util.isNull(obj2)) {
+	return true;
+      } else if (Util.isAtom(obj1) && Util.isAtom(obj2)) {
+	return obj1 == obj2;
+      } else {
+	if (obj1.length == obj2.length) {
+	  for (var i = 0; i < obj1.length; i++) {
+	    if (!equal(obj1[i], obj2[i])) {
+	      return false;
+	    }
+	  }
+	  return true;
+	} else {
+	  return false;
+	}
+      }
+    };
+    return equal(args[0], args[1]);
+  }, 'Returns #t if <em>obj<sub1</sub></em> is equal to <em>obj<sub>2</sub>' +
+    '</em>.  If the objects are lists, they will be compared recursively. ' +
+    'As a rule of thumb, if the objects display the same, they are probably ' +
+    '"equal."', 'obj<sub>1</sub> obj<sub>2</sub>'),
+  'eqv?': new Builtin('eqv?', function(args) {
+    if (args.length != 2)
+      throw IllegalArgumentCountError('eqv?', 'exactly', 2, args.length);
+    return args[0] === args[1] || Util.isNull(args[0]) && Util.isNull(args[1]);
+  }, '<p>Currently returns the exact same value as <code>(eq? <em>obj<sub>1' +
+    '</sub></em> <em>obj<sub>2</sub></em>)</code></p>',
+    'obj<sub>1</sub> obj<sub>2</sub>'),
+  'expt': new Builtin('expt', function(args) {
+    if (args.length != 2)
+      throw IllegalArgumentCountError('expt', 'exactly', 1, args.length);
+    if (!Util.isNumber(args[0]))
+      throw IllegalArgumentTypeError('expt', args[0], 1);
+    if (!Util.isNumber(args[1]))
+      throw IllegalArgumentTypeError('expt', args[1], 2);
+    return Math.pow(args[0], args[1]);
+  }, 'Returns <em>a</em> to the power of <em>b</em>.', 'a b'),
   'force': new Builtin('force', function(args) {
     if (args.length != 1)
       throw IllegalArgumentCountError('force', 'exactly', 1, args.length);
@@ -910,24 +956,36 @@ var ReservedSymbolTable = new Hash({
     return jscm_evif(Util.cdr(e), env);
   }, 'An <strong>if</strong> expression ', 'test consequent [alternate]'),
   'lambda': new SpecialForm('lambda', function(e, env) {
-    if (e[1].length != e[1].uniq().length)
-      throw "Ill-formed special form: " + Util.format(e);
-    return function(args) {
-      env = env.extension();
-      if (e[1].length != args.length)
-	throw IllegalArgumentCountError('#[compound-procedure]', 'exactly',
-					e[1].length, args.length);
-      var bargs = [];
-      for (var i = 0; i < args.length; i++) {
-	bargs[i] = new Box(args[i]);
-      }
-      env.multiExtend(e[1], bargs);
-      return jscm_beglis(Util.cdr(Util.cdr(e)), env);
-    };
-  }, 'Evaluates to a procedure.  Currently, the formals <u>must</u> be in ' +
-    'the form of a list. <p><br />((lambda (a) (+ a 1)) 2) ==> 3 ' +
-    '; procedure that adds 1 to a</p>',
-    '(formals) body'),
+    if (e.length != 3) {
+      throw new JSError(Util.format(e), "Ill-formed special form", false);
+    }
+    if (Util.isAtom(e[1])) {
+      return function(args) {
+	env = env.extension();
+	env.extend(e[1], new Box(args));
+	return jscm_beglis(Util.cdr(Util.cdr(e)), env);
+      };
+    } else if (Object.isArray(e[1])) {
+      if (e[1].length != e[1].uniq().length)
+	throw new JSError(Util.format(e), "Ill-formed special form", false);
+      return function(args) {
+	env = env.extension();
+	if (e[1].length != args.length)
+	  throw IllegalArgumentCountError('#[compound-procedure]', 'exactly',
+					  e[1].length, args.length);
+	var bargs = [];
+	for (var i = 0; i < args.length; i++) {
+	  bargs[i] = new Box(args[i]);
+	}
+	env.multiExtend(e[1], bargs);
+	return jscm_beglis(Util.cdr(Util.cdr(e)), env);
+      };
+    }
+  }, 'Evaluates to a procedure.  Currently, there are two possible forms for ' +
+    '&lt;formals&gt;:<ul style="margin-top:5px;"><li>(variable<sub>1</sub> ...) <p>The procedure takes'+
+    ' a fixed number of arguments.</p></li><li>variable<p>The procedure takes '+
+    'any number of arguments, stored in a list with the name <em>variable' +
+    '</em>.</p></li></ul>', '&lt;formals&gt; body'),
   'length': new Builtin('length', function(args) {
     if (args.length != 1)
       throw IllegalArgumentCountError('length', 'exactly', 1, args.length);
@@ -935,7 +993,7 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentTypeError('length', args[0], 1);
     return args[0].length;
   }, 'Returns the length of <em>list</em>.', 'list'),
-  'let': new Builtin('let', function(e, env) {
+  'let': new SpecialForm('let', function(e, env) {
     var expr = Util.cons(Util.cons(Tokens.LAMBDA,
                                    Util.cons(Util.map(function(el) {
 			                         return Util.car(el);
@@ -953,7 +1011,7 @@ var ReservedSymbolTable = new Hash({
     'value of the last expression is the value of the let expression.</p>' +
     '<p><em>body</em> is evaluated in an extended environment.</p>',
      'bindings body'),
-  'let*': new Builtin('let*', function(e, env) {
+  'let*': new SpecialForm('let*', function(e, env) {
     var help = function(e, b) {
       if (Util.isNull(e)) {
 	return [];
@@ -1030,7 +1088,53 @@ var ReservedSymbolTable = new Hash({
       }
     }
   }, 'Returns #t if <em>obj</em> is a list, and returns #f otherwise.', 'obj'),
- 'map': new Builtin('map', function(args) {
+  'list-ref': new Builtin('list-ref', function(args) {
+    if (args.length != 2) {
+      throw IllegalArgumentCountError('list-ref', 'exactly', 2, args.length);
+    } else if (!Object.isArray(args[0])) {
+      throw IllegalArgumentTypeError('list-ref', args[0], 1);
+    } else if (!Util.isNumber(args[1])) {
+      throw IllegalArgumentTypeError('list-ref', args[1], 2);
+    } else if (args[0] < 0) {
+      throw IllegalArgumentError('The object ' + args[1] + ', passed as an ' +
+	'argument to list-ref, is not an index integer.');
+    } else if (args[1] >= args[0].length) {
+      throw IllegalArgumentError('The object ' + args[1] + ', passed as an ' +
+	'argument to list-ref, is not in the correct range.');
+    } else {
+      return args[0][args[1]];
+    }
+  }, 'Returns the <em>k</em>th element of <em>list</em>.  It is an error if ' +
+    '<em>list</em> has fewer than <em>k</em> elements.', 'list k'),
+  'list-tail': new Builtin('list-tail', function(args) {
+    if (args.length != 2) {
+      throw IllegalArgumentCountError('list-tail', 'exactly', 2, args.length);
+    } else if (!Object.isArray(args[0])) {
+      throw IllegalArgumentTypeError('list-tail', args[0], 1);
+    } else if (!Util.isNumber(args[1])) {
+      throw IllegalArgumentTypeError('list-tail', args[1], 2);
+    } else if (args[1] < 0) {
+      throw IllegalArgumentError('The object ' + args[1] + ', passed as an ' +
+	'argument to list-tail, is not an index integer.');
+    } else if (args[0].length < args[1]) {
+      throw IllegalArgumentError('The object ' + args[1] + ', passed as an ' +
+	'argument to list-tail, is not in the correct range.');
+    } else {
+      return args[0].slice(args[1]);
+    }
+  }, 'Returns the sublist of <em>list</em> obtained by omitting the first ' +
+  '<em>k</em> elements of <em>list</em> It is an error if <em>list</em> ' +
+  'has fewer than <em>k</em> elements.', 'list k'),
+  'log': new Builtin('log', function(args) {
+    if (args.length != 1) {
+      throw IllegalArgumentCountError('log', 'exactly', 1, args.length);
+    } else if (!Util.isNumber(args[0])) {
+      throw IllegalArgumentTypeError('log', args[0], 1);
+    } else {
+      return Math.log(args[0]) / Math.log(2);
+    }
+  }, 'Returns the natural logarithm (base 2) of <em>z</em>.', 'z'),
+  'map': new Builtin('map', function(args) {
     if (args.length < 2)
       throw IllegalArgumentCountError('map', 'at least', 2, args.length);
     var proc = args[0];
@@ -1043,7 +1147,7 @@ var ReservedSymbolTable = new Hash({
     var lists = Util.cdr(args);
     for (var i = 1; i < lists.length; i++) {
       if (lists[i].length != lists[0].length)
-	throw "IllegalArgumentError: all of the lists must be the same length";
+	throw IllegalArgumentError("all of the lists must be the same length");
     }
     var res = [];
     for (var j = 0; j < lists[0].length; j++) {
@@ -1103,15 +1207,6 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentCountError('pair?', 'exactly', 1, args.length);
     return !Util.isNull(args[0]) && !Util.isAtom(args[0]);
   }, 'Returns #t if <em>obj</em> is a pair, and returns #f otherwise.', 'obj'),
-  'expt': new Builtin('expt', function(args) {
-    if (args.length != 2)
-      throw IllegalArgumentCountError('expt', 'exactly', 1, args.length);
-    if (!Util.isNumber(args[0]))
-      throw IllegalArgumentTypeError('expt', args[0], 1);
-    if (!Util.isNumber(args[1]))
-      throw IllegalArgumentTypeError('expt', args[1], 2);
-    return Math.pow(args[0], args[1]);
-  }, 'Returns <em>a</em> to the power of <em>b</em>.', 'a b'),
   'quote': new SpecialForm('quote', function(e, env) {
     return function(args) {
       if (args.length != 1)
@@ -1158,6 +1253,16 @@ var ReservedSymbolTable = new Hash({
     return Math.cos(args[0]);
   }, 'Returns the sine (in radians) of <em>number</em> using the JavaScript ' +
     '<strong>Math.sin()</strong> function.', 'number'),
+  'sqrt': new Builtin('sqrt', function(args) {
+    if (args.length != 1) {
+      throw IllegalArgumentCountError('sqrt', 'exactly', 1, args.length);
+    } else if (!Util.isNumber(args[0])) {
+      throw IllegalArgumentTypeError('sqrt', args[0], 1);
+    } else {
+      return Math.sqrt(args[0]);
+    }
+  }, 'Returns the square root of <em>z</em>, or <code>NaN</code> if ' +
+    '<em>z</em> is less than 0.', 'z'),
   'tan': new Builtin('tan', function(args) {
     if (args.length != 1)
       throw IllegalArgumentCountError('tan', 'exactly', 1, args.length);
@@ -1204,7 +1309,7 @@ var ReservedSymbolTable = new Hash({
     if (args.length == 0) {
       throw IllegalArgumentCountError('-', 'at least', 2, args.length);
     } else if (args.length == 1 && Util.isNumber(args[0])) {
-      return arg[0] * -1;
+      return args[0] * -1;
     } else if (args.length == 1) {
       throw IllegalArgumentTypeError('-', args[0], 1);
     } else {
@@ -1323,7 +1428,13 @@ function jscm_repl()
 
 function jscm_eval(expr, env)
 {
-  return jscm_expressionToAction(expr)(expr, env);
+  var action = jscm_expressionToAction(expr);
+  if (typeof action == 'function') {
+    return action(expr, env);
+  } else {
+    throw new TypeError('The object ' + Util.format(action) +
+			' is not applicable.');
+  }
 }
 
 function jscm_beglis(es, env)
@@ -1366,21 +1477,16 @@ function jscm_evif(args, env)
 
 function jscm_expressionToAction(expr)
 {
-  return Util.isAtom(expr) ? jscm_atomToAction(expr) : jscm_listToAction(expr);
-}
-
-function jscm_atomToAction(atom)
-{
-  atom = atom.toLowerCase();
-  return Util.isNumber(atom) || Util.isString(atom) ||
-    ReservedSymbolTable.get(atom) != undefined ?
-      Actions.CONST : Actions.IDENTIFIER;
-}
-
-function jscm_listToAction(list)
-{
-    return Util.isAtom(list[0]) && ActionTokens[list[0].toLowerCase()] ?
-      Actions.getReserved(list[0]) : Actions.APPLICATION;
+  if (Util.isAtom(expr)) {
+    expr = expr.toLowerCase();
+    if (Util.isNumber(expr) || Util.isString(expr)) {
+      return Actions.CONST;
+    } else {
+      return Actions.IDENTIFIER;
+    }
+  } else {
+    return Actions.APPLICATION;
+  }
 }
 
 function jscm_print(obj)
@@ -1516,6 +1622,7 @@ function jscm_getHelpList(keys, ITEMS_PER_COL, test) {
   var tab = 0;
   var open = true;
   var list = '<ul>';
+  keys.sort();
   for (var i = 0; i < keys.length; i++) {
     if (test(keys[i])) {
       tab++;
