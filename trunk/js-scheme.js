@@ -1,7 +1,6 @@
 /*******************************************************************************
  JS-SCHEME - a Scheme interpreter written in JavaScript
- (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.3
-
+ (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.4
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software
  Foundation, either version 3 of the License, or (at your option) any later
@@ -16,8 +15,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.3b r1',
-  date: '31 Aug 2008'
+  version: '0.4b r1',
+  date: '5 Sep 2008'
 };
 
 var  Document = {
@@ -59,6 +58,18 @@ var Tokens = {
   SPACE: ' ',
   STRING: '^[\\"](([^\\"\\\\]|([\\\\].))*)[\\"]'
 };
+
+var JSCMLibs = new Hash();
+
+var JSCMLib = Class.create({
+  initialize: function(name) {
+    JSCMLibs.set(name, this);
+  }
+});
+
+function jscm_registerLib(name, lib) {
+  JSCMLibs.set(name, lib);
+}
 
 var Util = new (Class.create({
   initialize: function()
@@ -197,7 +208,8 @@ var Util = new (Class.create({
     } else {
       return true;
     }
-  }
+  },
+  JSCMLibs: new Hash()
 }))();
 
 var JSString = Class.create({
@@ -998,7 +1010,9 @@ var ReservedSymbolTable = new Hash({
     'lists specified.</p>', 'proc list<sub>1</sub> . list<sub>n</sub>'),
   'help': new Builtin('help', function(args) {
     throw new Escape(jscm_printHelp, args);
-  }, 'Displays help information for JS-SCHEME.'),
+  }, 'Displays help information for JS-SCHEME.<p><em>Obj</em> may be an actual' +
+    ' function object, or a string for the name of a library to lookup.</p>',
+    '[obj]'),
   'if': new SpecialForm('if', function(e, env) {
     var args = Util.cdr(e);
     if (jscm_eval(args[0], env)) {
@@ -1179,6 +1193,31 @@ var ReservedSymbolTable = new Hash({
   }, 'Returns the sublist of <em>list</em> obtained by omitting the first ' +
   '<em>k</em> elements of <em>list</em> It is an error if <em>list</em> ' +
   'has fewer than <em>k</em> elements.', 'list k'),
+  'load': new SpecialForm('load', function(e, env) {
+    if (e.length != 2) {
+      throw IllegalArgumentCountError('load', 'exactly', 1, e.length - 1);
+    } else {
+      var name = jscm_eval(e[1], env);
+      var lib = JSCMLibs.get(name);
+      if (lib === undefined) {
+	throw new JSError('No library registered for: ' + name,
+			  'IllegalArgument');
+      } else if (lib instanceof JSCMLib) {
+	/* nothing to do, lib already initialized */
+      } else {
+	try {
+	  lib = new lib();
+	  JSCMLibs.set(name, lib);
+	} catch (e) {
+	  throw IllegalArgumentTypeError('load', lib, 1);
+	}
+      }
+      lib.getProcedures().each(function (proc) {
+				 env.extend(proc.key, new Box(proc.value));
+			       });
+      return lib;
+    }
+  }, '', 'lib'),
   'log': new Builtin('log', function(args) {
     Util.validateNumberArg('log', args);
     return Math.log(args[0]) / Math.log(2);
@@ -1453,6 +1492,9 @@ function jscm_repl()
     } catch (e) {
       if (e instanceof Escape) {
 	e.invoke();
+	if (REPL.buffer.length > 0) {
+	  jscm_printElement();
+	}
       } else {
 	jscm_print(e);
       }
@@ -1568,8 +1610,14 @@ function jscm_printHelp(args)
   div.addClassName('help');
   if (args.length == 0) {
     div.update(jscm_getHelp());
-  } else if (args.length == 1 && args[0].doc) {
-    div.update(jscm_getBuiltinHelp(args[0]));
+  } else if (args.length == 1)  {
+    var arg = args[0];
+    if (!arg.doc && JSCMLibs.get(arg)) {
+      arg = JSCMLibs.get(arg);
+    }
+    if (arg.doc) {
+      div.update(jscm_getBuiltinHelp(arg));
+    }
   }
   $(Document.CONSOLE).appendChild(div);
   window.scrollTo(0, document.body.scrollHeight);

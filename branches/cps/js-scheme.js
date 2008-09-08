@@ -1,6 +1,6 @@
 /*******************************************************************************
  JS-SCHEME - a Scheme interpreter written in JavaScript
- (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.3
+ (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.4
 
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software
@@ -16,8 +16,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.3b r1, CPS',
-  date: '31 Aug 2008'
+  version: '0.4b r1, CPS',
+  date: '5 Sep 2008'
 };
 
 var  Document = {
