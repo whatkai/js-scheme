@@ -814,7 +814,7 @@ var ReservedSymbolTable = new Hash({
     return Math.cos(args[0]);
   }, 'Returns the cosine (in radians) of <em>z</em>.', 'z'),
   'define': new SpecialForm('define', function(e, env) {
-    if (e.length < 2 || e.length > 3) {
+    if (e.length < 2) {
       throw new JSError(Util.format(e), "Ill-formed special form", false);
     }
     var name = e[1];
