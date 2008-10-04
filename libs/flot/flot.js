@@ -22,39 +22,39 @@ var FlotLib = Class.create(JSCMLib, {
     this.name = 'FLOT LIBRARY';
     this.procedures = new Hash({
       'flot:plotf': new Builtin('plotf', function(args) {
-	throw new Escape(function() {
-	  var range = args[1];
-	  var x1 = undefined;
-	  var x2 = undefined;
-	  if (Object.isArray(range)) {
-	    x1 = range[0];
-	    x2 = range[1];
-	  } else if (range instanceof Pair) {
-	    x1 = range.car;
-	    x2 = range.cdr;
+	var range = args[1];
+	var x1 = undefined;
+	var x2 = undefined;
+	if (Object.isArray(range)) {
+	  /* For some reason these are getting passed in as strings? */
+	  x1 = Util.getNumber(range[0]);
+	  x2 = Util.getNumber(range[1]);
+	} else if (range instanceof Pair) {
+	  x1 = range.car;
+	  x2 = range.cdr;
+	}
+	var data = [];
+	for (var i = 0; i < args[0].length; i++) {
+	  var plot = [];
+	  var fx = args[0][i];
+	  if (fx instanceof Builtin) {
+	    fx = fx.apply;
+	  } else if (typeof fx != 'function') {
+	    throw IllegalArgumentTypeError(/* TODO */);
 	  }
+	  for (var j = x1; j <= x2; j += args[2]) {
+	    plot.push([j, fx([j])]);
+	  }
+	  data.push(plot);
+	}
+	throw new Escape(function() {
 	  var id = 'flot' + REPL.helpid;
 	  var html = '<div id="' + id + '" class="flot" style="width="></div>';
 	  jscm_printToggleBox('FLOT GRAPH', html);
-	  var data = [];
-	  for (var i = 0; i < args[0].length; i++) {
-	    var plot = [];
-	    var fx = args[0][i];
-	    if (fx instanceof Builtin) {
-	      fx = fx.apply;
-	    } else if (typeof fx != 'function') {
-	      throw IllegalArgumentTypeError(/* TODO */);
-	    }
-	    for (var j = x1; j <= x2; j += args[2]) {
-	      plot.push([j, fx([j])]);
-	    }
-	    data.push(plot);
-	  }
 	  try {
-	    alert(Util.format(data));
 	    jQuery.plot(jQuery('#' + id), data);
 	  } catch (e) {
-	    alert(e);
+	    jscm_print(e);
 	    /* we've got to catch our own errors here since we're escaping! */
 	  }
 	});
