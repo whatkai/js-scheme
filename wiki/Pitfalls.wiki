@@ -1,4 +1,5 @@
 #summary Status of the R5RS Pitfalls Test Cases
+#labels Featured
 
 = R^5^RS Pitfalls Test Results = 
 
