@@ -16,7 +16,7 @@
 var JSScheme = {
   author: 'Erik Silkensen',
   version: '0.4b r1',
-  date: '5 Sep 2008'
+  date: '3 Oct 2008'
 };
 
 var  Document = {
@@ -72,8 +72,7 @@ function jscm_registerLib(name, lib) {
 }
 
 var Util = new (Class.create({
-  initialize: function()
-  {
+  initialize: function() {
     this._isIdentifier = this.createMatcher(Tokens.IDENTIFIER);
     this.isString = this.createMatcher(Tokens.STRING);
     this.isBinary = this.createMatcher(Tokens.BINARY);
@@ -84,36 +83,30 @@ var Util = new (Class.create({
     this.isNumber = this.createMatcher(Tokens.BINARY + OR + Tokens.DECIMAL +
 				       OR + Tokens.HEX + OR + Tokens.OCTAL);
   },
-  isIdentifier: function(expr)
-  {
+  isIdentifier: function(expr) {
     return !this.isNumber(expr) && !this.isString(expr) &&
       this._isIdentifier(expr);
   },
-  car: function(list)
-  {
+  car: function(list) {
     return list[0];
   },
-  cdr: function(list)
-  {
+  cdr: function(list) {
     return list.slice(1);
     var tmp = list.clone();
     tmp.shift();
     return tmp;
   },
-  cons: function(x, list)
-  {
+  cons: function(x, list) {
     var tmp = list.clone();
     tmp.unshift(x);
     return tmp;
   },
-  createMatcher: function(regex)
-  {
+  createMatcher: function(regex) {
     return function(expr) {
       return new RegExp(regex).test(expr);
     };
   },
-  getNumber: function(expr)
-  {
+  getNumber: function(expr) {
     expr = expr.toString();
     if (this.isBinary(expr)) {
       var res = 0, pow = 0;
@@ -142,18 +135,15 @@ var Util = new (Class.create({
       throw new TypeError(expr + " is not a string");
     }
   },
-  isAtom: function(expr)
-  {
+  isAtom: function(expr) {
     return !Object.isArray(expr);
   },
-  isNull: function(expr)
-  {
+  isNull: function(expr) {
     return Object.isArray(expr) && expr.length == 0;
   },
-  format: function(expr)
-  {
+  format: function(expr) {
     if (typeof expr == 'function') {
-      return '#<procedure>';
+      return expr.name === undefined ? '#<procedure>' : expr.name;
     } else if (expr === true) {
       return '#t';
     } else if (expr === false) {
@@ -165,10 +155,17 @@ var Util = new (Class.create({
     } else if (Object.isArray(expr) && expr[0] instanceof Pair) {
       var cpy = expr.clone();
       for (var i = 0; i < cpy.length; i++) {
-	cpy[i] = cpy[i].toString();
+	cpy[i] = this.format(cpy[i]);
       }
       return Object.inspect(cpy).gsub('[\\[]', '(').gsub(']',')').gsub(',','')
 	.gsub('\'','');
+    } else if (Object.isArray(expr)) {
+      var str = '(';
+      for (var i = 0; i < expr.length; i++) {
+	str += (i > 0 ? ' ' : '') + this.format(expr[i]);
+      }
+      str += ')';
+      return str;
     } else {
       return Object.inspect(expr).gsub('[\\[]','(').gsub(']',')').gsub(',','')
 	.gsub('\'','');
@@ -227,7 +224,7 @@ var Escape = Class.create({
     this.args = args;
   },
   invoke: function() {
-    this.cc(this.args);
+    this.cc.apply(undefined, this.args);
   }
 });
 
@@ -537,8 +534,7 @@ var Parser = Class.create({
 });
 
 var Actions = {
-  APPLICATION: function(expr, env)
-  {
+  APPLICATION: function(expr, env) {
     var proc = jscm_eval(Util.car(expr), env);
     if (proc instanceof SpecialForm) {
       return proc.apply(expr, env);
@@ -554,8 +550,7 @@ var Actions = {
       return proc(args);
     }
   },
-  CONST: function(expr, env)
-  {
+  CONST: function(expr, env) {
     var exprl = expr.toLowerCase();
     if (Util.isNumber(exprl)) {
       return Util.getNumber(exprl);
@@ -565,8 +560,7 @@ var Actions = {
       throw new JSError(expr + " not recognized as CONST", "Value");
     }
   },
-  IDENTIFIER: function(expr, env)
-  {
+  IDENTIFIER: function(expr, env) {
     return env.lookup(expr.toLowerCase()).unbox();
   }
 };
@@ -842,7 +836,7 @@ var ReservedSymbolTable = new Hash({
 	    return name;
 	  }
 	} else {
-	  throw IllegalArgumentCountError('define', '1 or', 2, e.length - 1);
+	  throw new JSError(Util.format(e), "Ill-formed special form", false);
 	}
       }
     } else if (!Util.isNull(name)) {
@@ -881,14 +875,21 @@ var ReservedSymbolTable = new Hash({
     'asked (by the <strong>force</strong> procedure) to evaluate ' +
     '<em>expression</em>, and deliver the resulting value.', 'expression'),
   'display': new Builtin('display', function(args) {
-    if (args.length != 1)
+    if (args.length != 1) {
       throw IllegalArgumentCountError('display', 'exactly', 1, args.length);
-    jscm_printDisplay(Util.format(args[0]));
-    return undefined;
+    } else {
+      var fmt = Util.format(args[0]);
+      if (Util.isString(fmt)) {
+	jscm_printDisplay(Util.getString(fmt));
+      } else {
+	jscm_printDisplay(fmt);
+      }
+    }
   }, 'Prints <em>obj</em>.', 'obj'),
   'display-built-ins': new Builtin('display-built-ins', function(args) {
-    throw new Escape(jscm_printBuiltinsHelp, args);
+    throw new Escape(jscm_printBuiltinsHelp, [args]);
   }, 'Displays the list of built-in procedures.'),
+  'e': Math.E,
   'else': true,
   'eval': new SpecialForm('eval', function(e, env) {
     if (e.length != 2)
@@ -972,6 +973,10 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentTypeError('expt', args[1], 2);
     return Math.pow(args[0], args[1]);
   }, 'Returns <em>a</em> to the power of <em>b</em>.', 'a b'),
+  'floor': new Builtin('floor', function(args) {
+    Util.validateNumberArg('floor', args);
+    return Math.floor(args[0]);
+  }, 'Returns the largest integer less than or equal to <em>z</em>.', 'z'),
   'force': new Builtin('force', function(args) {
     if (args.length != 1)
       throw IllegalArgumentCountError('force', 'exactly', 1, args.length);
@@ -1009,8 +1014,8 @@ var ReservedSymbolTable = new Hash({
     '<p><em>Proc</em> must be a function of as many arguments as there are ' +
     'lists specified.</p>', 'proc list<sub>1</sub> . list<sub>n</sub>'),
   'help': new Builtin('help', function(args) {
-    throw new Escape(jscm_printHelp, args);
-  }, 'Displays help information for JS-SCHEME.<p><em>Obj</em> may be an actual' +
+    throw new Escape(jscm_printHelp, [args]);
+  }, 'Displays help information for JS-SCHEME.<p><em>Obj</em> may be an actual'+
     ' function object, or a string for the name of a library to lookup.</p>',
     '[obj]'),
   'if': new SpecialForm('if', function(e, env) {
@@ -1028,15 +1033,17 @@ var ReservedSymbolTable = new Hash({
       throw new JSError(Util.format(e), "Ill-formed special form", false);
     }
     if (Util.isAtom(e[1])) {
-      return function(args) {
+      var proc = function(args) {
 	env = env.extension();
 	env.extend(e[1], new Box(args));
 	return jscm_beglis(Util.cdr(Util.cdr(e)), env);
       };
+      proc.name = '#[compound-procedure]';
+      return proc;
     } else if (Object.isArray(e[1])) {
       if (e[1].length != e[1].uniq().length)
 	throw new JSError(Util.format(e), "Ill-formed special form", false);
-      return function(args) {
+      var proc = function(args) {
 	env = env.extension();
 	if (e[1].length != args.length)
 	  throw IllegalArgumentCountError('#[compound-procedure]', 'exactly',
@@ -1048,9 +1055,12 @@ var ReservedSymbolTable = new Hash({
 	env.multiExtend(e[1], bargs);
 	return jscm_beglis(Util.cdr(Util.cdr(e)), env);
       };
+      proc.name = '#[compound-procedure]';
+      return proc;
     }
   }, 'Evaluates to a procedure.  Currently, there are two possible forms for ' +
-    '&lt;formals&gt;:<ul style="margin-top:5px;"><li>(variable<sub>1</sub> ...) <p>The procedure takes'+
+    '&lt;formals&gt;:<ul style="margin-top:5px;"><li>(variable<sub>1' +
+    '</sub> ...) <p>The procedure takes'+
     ' a fixed number of arguments.</p></li><li>variable<p>The procedure takes '+
     'any number of arguments, stored in a list with the name <em>variable' +
     '</em>.</p></li></ul>', '&lt;formals&gt; body'),
@@ -1251,6 +1261,25 @@ var ReservedSymbolTable = new Hash({
     '<em>list</em>s and returns a list of the results, in order.</p>' +
     '<p><em>Proc</em> must be a function of as many arguments as there are ' +
     'lists specified.</p>', 'proc list<sub>1</sub> . list<sub>n</sub>'),
+  'modulo': new Builtin('modulo', function(args) {
+    if (args.length != 2) {
+      throw IllegalArgumentCountError('modulo', 'exactly', 2, args.length);
+    } else if (!Util.isNumber(args[0])) {
+      throw IllegalArgumentTypeError('modulo', args[0], 1);
+    } else if (!Util.isNumber(args[1])) {
+      throw IllegalArgumentTypeError('modulo', args[1], 2);
+    } else {
+      return args[0] % args[1];
+    }
+  }, 'Returns <em>n<sub>1</sub></em> modulo <em>n<sub>2</sub></em>.',
+    'n<sub>1</sub> n<sub>2</sub>'),
+  'newline': new Builtin('newline', function(args) {
+    if (args.length != 0) {
+      throw IllegalArgumentCountError('newline', 'exactly', 0, args.length);
+    } else {
+      REPL.newline();
+    }
+  }, 'newline!'),
   'not': new Builtin('not', function(args) {
     if (args.length != 1)
       throw IllegalArgumentCountError('not', 'exactly', 1, args.length);
@@ -1292,6 +1321,7 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentCountError('pair?', 'exactly', 1, args.length);
     return !Util.isNull(args[0]) && !Util.isAtom(args[0]);
   }, 'Returns #t if <em>obj</em> is a pair, and returns #f otherwise.', 'obj'),
+  'pi': Math.PI,
   'procedure?': new Builtin('procedure?', function(args) {
     if (args.length != 1) {
       throw IllegalArgumentCountError('procedure?', 'exactly', 1, args.length);
@@ -1308,6 +1338,12 @@ var ReservedSymbolTable = new Hash({
     '<strong>\'</strong> may also be used as an abbreviation, where ' +
     '<strong>\'<em>datum</em></strong> is equivalent to <strong>(quote <em>' +
     'datum</em></strong>)</p>', 'datum'),
+  'random': new Builtin('random', function(args) {
+    if (args.length != 0) {
+      throw IllegalArgumentCountError('random', 'exactly', 0, args.length);
+    }
+    return Math.random();
+  }, 'Returns a pseudo-random number in the range [0,1).'),
   'reverse': new Builtin('reverse', function(args) {
     if (args.length != 1)
       throw IllegalArgumentCountError('reverse', 'exactly', 1, args.length);
@@ -1338,7 +1374,7 @@ var ReservedSymbolTable = new Hash({
     'variable [expression]'),
   'sin': new Builtin('sin', function(args) {
     Util.validateNumberArg('sin', args);
-    return Math.cos(args[0]);
+    return Math.sin(args[0]);
   }, 'Returns the sine (in radians) of <em>z</em>.', 'z'),
   'sqrt': new Builtin('sqrt', function(args) {
     Util.validateNumberArg('sqrt', args);
@@ -1421,11 +1457,11 @@ var ReservedSymbolTable = new Hash({
 });
 
 var Interpreter = Class.create({
-  initialize: function()
-  {
+  initialize: function() {
     this.parser = new Parser();
     this.history = new History();
     this.buffer = [];
+    this.buffln = undefined;
     this.expr = '';
     this.histid = 0;
     this.lineno = 0;
@@ -1436,33 +1472,47 @@ var Interpreter = Class.create({
     this.CONTINUE_PREFIX = '<span class="continue">..&nbsp;</span>';
     this.prefix = this.DEFAULT_PREFIX;
   },
-  reset: function()
-  {
+  reset: function() {
     this.lineno = 0;
     this.expr = '';
     this.prefix = this.DEFAULT_PREFIX;
   },
-  focus: function()
-  {
+  focus: function() {
     $(Document.INPUT).focus();
   },
-  getline: function()
-  {
+  getline: function() {
     return $F(Document.INPUT);
   },
-  setline: function(line)
-  {
+  setline: function(line) {
     $(Document.INPUT).value = line;
   },
-  updateprefix: function(prefix)
-  {
+  updateprefix: function(prefix) {
     prefix = prefix === undefined ? this.prefix : prefix;
     $(Document.PREFIX).update(prefix);
+  },
+  getbuff: function() {
+    if (this.buffln === undefined) {
+      this.buffln = document.createElement('span');
+      this.buffln.addClassName('block');
+    }
+    return this.buffln;
+  },
+  resetbuff: function() {
+    if (this.buffln) {
+      this.buffer.push(this.buffln);
+    }
+  },
+  appendbuff: function(text) {
+    this.getbuff().appendChild(document.createTextNode(text));
+  },
+  newline: function() {
+    this.getbuff();
+    this.resetbuff();
+    this.buffln = undefined;
   }
 });
 
-function jscm_repl()
-{
+function jscm_repl() {
   if (REPL.expr.length == 0 && REPL.getline().strip().length == 0) {
     jscm_printElement();
   } else {
@@ -1504,8 +1554,7 @@ function jscm_repl()
   return false;
 };
 
-function jscm_eval(expr, env)
-{
+function jscm_eval(expr, env) {
   var action = jscm_expressionToAction(expr);
   if (typeof action == 'function') {
     return action(expr, env);
@@ -1515,16 +1564,14 @@ function jscm_eval(expr, env)
   }
 }
 
-function jscm_beglis(es, env)
-{
+function jscm_beglis(es, env) {
   for (var i = 0; i < es.length - 1; i++) {
     jscm_eval(es[i], env);
   }
   return jscm_eval(es[es.length - 1], env);
 }
 
-function jscm_evlis(arglis, env)
-{
+function jscm_evlis(arglis, env) {
   var res = [];
   for (var i = 0; i < arglis.length; i++) {
     res.push(jscm_eval(arglis[i], env));
@@ -1532,8 +1579,7 @@ function jscm_evlis(arglis, env)
   return res;
 }
 
-function jscm_expressionToAction(expr)
-{
+function jscm_expressionToAction(expr) {
   if (Util.isAtom(expr)) {
     expr = expr.toLowerCase();
     if (Util.isNumber(expr) || Util.isString(expr)) {
@@ -1546,8 +1592,7 @@ function jscm_expressionToAction(expr)
   }
 }
 
-function jscm_print(obj)
-{
+function jscm_print(obj) {
   if (obj instanceof JSWarning) {
     jscm_printBlock(';' + obj, 'warning');
   } else if ((obj instanceof Error) || (obj instanceof JSError)) {
@@ -1557,8 +1602,7 @@ function jscm_print(obj)
   }
 }
 
-function jscm_printElement(element, prefix)
-{
+function jscm_printElement(element, prefix) {
   prefix = prefix === undefined ? REPL.prefix : prefix;
   var div = document.createElement('div');
   var pre = document.createElement('span');
@@ -1571,10 +1615,12 @@ function jscm_printElement(element, prefix)
   line.appendChild(pre);
   line.appendChild(expr);
   div.appendChild(line);
+  REPL.resetbuff();
   for (var i = 0; i < REPL.buffer.length; i++) {
     div.appendChild(REPL.buffer[i]);
   }
   REPL.buffer = [];
+  REPL.buffln = undefined;
   if (element) {
     div.appendChild(element);
   }
@@ -1585,8 +1631,7 @@ function jscm_printElement(element, prefix)
   window.scrollTo(0, document.body.scrollHeight);
 }
 
-function jscm_printBlock(text, className)
-{
+function jscm_printBlock(text, className) {
   var span = document.createElement('span');
   span.addClassName(className);
   span.addClassName('block');
@@ -1594,16 +1639,11 @@ function jscm_printBlock(text, className)
   jscm_printElement(span);
 }
 
-function jscm_printDisplay(text)
-{
-  var span = document.createElement('span');
-  span.addClassName('block');
-  span.appendChild(document.createTextNode(text));
-  REPL.buffer.push(span);
+function jscm_printDisplay(text) {
+  REPL.appendbuff(text);
 }
 
-function jscm_printHelp(args)
-{
+function jscm_printHelp(args) {
   jscm_printElement();
   REPL.helpid++;
   var div = document.createElement('div');
@@ -1623,8 +1663,20 @@ function jscm_printHelp(args)
   window.scrollTo(0, document.body.scrollHeight);
 }
 
-function jscm_getHelp()
-{
+function jscm_printToggleBox(title, html) {
+  jscm_printElement();
+  REPL.helpid++;
+  var div = document.createElement('div');
+  div.addClassName('help');
+  div.update('<h1><span>' + title + '</span> ' +
+	     jscm_getToggleLinkFor('helpBody', 'helpMin') + '</h1>' +
+	     '<div class="helpBody"><div id="helpBody' + REPL.helpid + '">' +
+	     html + '</div>');
+  $(Document.CONSOLE).appendChild(div);
+  window.scrollTo(0, document.body.scrollHeight);
+}
+
+function jscm_getHelp() {
   var builtins = '<h2><span>BUILT-IN PROCEDURES</span></h2>' +
     '<div class="builtinList" id="builtinList' + REPL.helpid + '">' +
     '<p>' +
@@ -1638,7 +1690,7 @@ function jscm_getHelp()
       'built-ins.' +
     '</p>';
   return '<h1><span>JS-SCHEME HELP</span> ' +
-    jscm_getToggleLinkFor('helpBody','helpMin') + '</h1><div class="helpBody">' +
+    jscm_getToggleLinkFor('helpBody','helpMin') + '</h1><div class="helpBody">'+
     '<div id="helpBody' + REPL.helpid + '">' +
     '<p>Welcome to JS-SCHEME ' + JSScheme.version + '!</p>' +
     '<p>' +
@@ -1659,8 +1711,7 @@ function jscm_getHelp()
     '</div></div>';
 }
 
-function jscm_getBuiltinHelp(proc)
-{
+function jscm_getBuiltinHelp(proc) {
   return '<h1><span>JS-SCHEME HELP</span> ' +
     '<span class="syntax"><strong>(' + proc.name +
     '</strong>' + (proc.argdoc ? ' <em>' + proc.argdoc + '</em>' : '') +
@@ -1704,7 +1755,7 @@ function jscm_getHelpList(keys, ITEMS_PER_COL, test) {
 }
 
 function jscm_getBuiltinsHTML() {
-  var ITEMS_PER_COL = 30;
+  var ITEMS_PER_COL = 35;
   var keys = ReservedSymbolTable.keys();
   var isBuiltin = function(key) {
     return ReservedSymbolTable.get(key) instanceof Builtin;
@@ -1713,20 +1764,18 @@ function jscm_getBuiltinsHTML() {
     jscm_getToggleLinkFor('builtinList', 'helpMin') +
     '</h1><div class="helpBody">' +
     '<div class="builtinList" id="builtinList' + REPL.helpid + '">' +
-    '<div>' + jscm_getHelpList(keys, ITEMS_PER_COL, isBuiltin) + '</div></div>' +
+    '<div>' + jscm_getHelpList(keys, ITEMS_PER_COL, isBuiltin) + '</div></div>'+
     '<div style="clear:both;"></div></div>';
 }
 
-function jscm_getToggleLinkFor(what, cssClass, text)
-{
+function jscm_getToggleLinkFor(what, cssClass, text) {
   if (text == undefined) text = '[toggle]';
     cssClass = cssClass ? (' class="' + cssClass + '" ') : '';
   return '<a href="#" onclick="$(\'' + what + REPL.helpid + '\').toggle();' +
     'return false;"' + cssClass + '>' + text + '</a>';
 }
 
-function jscm_onkeydown(e)
-{
+function jscm_onkeydown(e) {
   var code = e.keyCode;
   if (code == Document.KEY_DOWN && REPL.histid > 0) {
     if (REPL.histid >= REPL.history.size()) {
