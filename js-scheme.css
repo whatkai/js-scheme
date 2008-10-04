@@ -96,3 +96,8 @@ a.helpMin:hover { background: #f9f9f9; }
     padding-left: 15px;
 }
 
+.flot {
+    width: 35em;
+    height: 300px;
+}
+
