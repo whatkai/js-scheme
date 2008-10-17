@@ -15,8 +15,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.4b r1',
-  date: '4 Oct 2008'
+  version: '0.4b r2',
+  date: '16 Oct 2008'
 };
 
 var  Document = {
