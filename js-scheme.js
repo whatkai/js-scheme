@@ -16,7 +16,7 @@
 var JSScheme = {
   author: 'Erik Silkensen',
   version: '0.4b r1',
-  date: '3 Oct 2008'
+  date: '4 Oct 2008'
 };
 
 var  Document = {
@@ -160,11 +160,13 @@ var Util = new (Class.create({
       return Object.inspect(cpy).gsub('[\\[]', '(').gsub(']',')').gsub(',','')
 	.gsub('\'','');
     } else if (Object.isArray(expr)) {
-      var str = '(';
-      for (var i = 0; i < expr.length; i++) {
-	str += (i > 0 ? ' ' : '') + this.format(expr[i]);
+      var isqtd = expr.length > 0 && expr[0] == Tokens.QUOTE;
+      var str = isqtd ? '\'' : '(';
+      var start = isqtd ? 1 : 0;
+      for (var i = start; i < expr.length; i++) {
+	str += (i > start ? ' ' : '') + this.format(expr[i]);
       }
-      str += ')';
+      str += isqtd ? '' : ')';
       return str;
     } else {
       return Object.inspect(expr).gsub('[\\[]','(').gsub(']',')').gsub(',','')
@@ -1352,6 +1354,10 @@ var ReservedSymbolTable = new Hash({
     return args[0].reverse(false);
   }, 'Returns a newly allocated list containing the elements of ' +
     '<em>list</em> in reverse order.', 'list'),
+  'round': new Builtin('round', function(args) {
+    Util.validateNumberArg('round', args);
+    return Math.round(args[0]);
+  }, 'Rounds <em>z</em> to the nearest integer.','z'),
   'set!': new SpecialForm('set!', function(e, env) {
     var oldBox = undefined;
     var name = e[1].toLowerCase();
