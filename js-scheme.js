@@ -15,8 +15,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.4b r2',
-  date: '16 Oct 2008'
+  version: '0.4b r3',
+  date: '19 Oct 2008'
 };
 
 var  Document = {
@@ -893,6 +893,13 @@ var ReservedSymbolTable = new Hash({
   }, 'Displays the list of built-in procedures.'),
   'e': Math.E,
   'else': true,
+  'error': new Builtin('error', function(args) {
+    if (args.length != 1) {
+      throw IllegalArgumentCountError('error', 'exactly', 1, args.length);
+    } else {
+      throw new JSError(Util.format(args[0]));
+    }
+  }, 'Raises an error, displaying the <em>message</em>.', 'message'),
   'eval': new SpecialForm('eval', function(e, env) {
     if (e.length != 2)
       throw IllegalArgumentCountError('eval', 'exactly', 1, e.length - 1);
@@ -1229,7 +1236,7 @@ var ReservedSymbolTable = new Hash({
 			       });
       return lib;
     }
-  }, '', 'lib'),
+  }, 'Loads <em>lib</em> if it has not already been loaded.', 'lib'),
   'log': new Builtin('log', function(args) {
     Util.validateNumberArg('log', args);
     return Math.log(args[0]) / Math.log(2);
