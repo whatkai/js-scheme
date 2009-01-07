@@ -1,6 +1,6 @@
 /*******************************************************************************
  JS-SCHEME - a Scheme interpreter written in JavaScript
- (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.4
+ (c) 2009 Erik Silkensen, erik@silkensen.com, version 0.4
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software
  Foundation, either version 3 of the License, or (at your option) any later
@@ -15,8 +15,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.4b r3',
-  date: '19 Oct 2008'
+  version: '0.4b r4',
+  date: '7 Jan 2009'
 };
 
 var  Document = {
@@ -608,10 +608,10 @@ var ReservedSymbolTable = new Hash({
     alert(Util.format(args[0]));
     return undefined;
   }, 'Calls the native JavaScript function alert(<em>obj</em>);', 'obj'),
-  'and': new Builtin('and', function(args) {
+  'and': new SpecialForm('and', function(e, env) {
     var val = true;
-    for (var i = 0; i < args.length; i++) {
-      val = args[i];
+    for (var i = 1; i < e.length; i++) {
+      val = jscm_eval(e[i], env);
       if (val == false)
 	break;
     }
@@ -1312,11 +1312,11 @@ var ReservedSymbolTable = new Hash({
     Util.validateNumberArg('odd?', args);
     return args[0] % 2 != 0;
   }, 'Returns #t if <em>n</em> is odd, and returns #f otherwise.', 'n'),
- 'or': new Builtin('or', function(args) {
+  'or': new SpecialForm('or', function(e, env) {
    var ans = false;
-   for (var i = 0; i < args.length; i++) {
-     if (args[i]) {
-       ans = args[i];
+   for (var i = 1; i < e.length; i++) {
+     ans = jscm_eval(e[i], env);
+     if (ans) {
        break;
      }
    }
