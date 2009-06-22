@@ -15,8 +15,8 @@
 *******************************************************************************/
 var JSScheme = {
   author: 'Erik Silkensen',
-  version: '0.4b r4',
-  date: '7 Jan 2009'
+  version: '0.4b r5',
+  date: '22 Jun 2009'
 };
 
 var  Document = {
@@ -1231,7 +1231,7 @@ var ReservedSymbolTable = new Hash({
 	  throw IllegalArgumentTypeError('load', lib, 1);
 	}
       }
-      lib.getProcedures().each(function (proc) {
+      lib.procedures.each(function (proc) {
 				 env.extend(proc.key, new Box(proc.value));
 			       });
       return lib;
@@ -1335,7 +1335,8 @@ var ReservedSymbolTable = new Hash({
     if (args.length != 1) {
       throw IllegalArgumentCountError('procedure?', 'exactly', 1, args.length);
     }
-    return typeof args[0] == 'function';
+    return (typeof args[0] == 'function') ||
+      ((args[0] instanceof Builtin) && !(args[0] instanceof SpecialForm));
   }, 'Returns #t if <em>obj</em> is a procedure.', 'obj'),
   'quote': new SpecialForm('quote', function(e, env) {
     return function(args) {
