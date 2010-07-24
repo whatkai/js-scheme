@@ -1,6 +1,6 @@
 /*******************************************************************************
  JS-SCHEME - a Scheme interpreter written in JavaScript
- (c) 2009 Erik Silkensen, erik@silkensen.com, version 0.4
+ (c) 2010 Erik Silkensen, eriksilkensen@gmail.com, version 0.4
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software
  Foundation, either version 3 of the License, or (at your option) any later
@@ -92,9 +92,6 @@ var Util = new (Class.create({
   },
   cdr: function(list) {
     return list.slice(1);
-    var tmp = list.clone();
-    tmp.shift();
-    return tmp;
   },
   cons: function(x, list) {
     var tmp = list.clone();
