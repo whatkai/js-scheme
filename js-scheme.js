@@ -1,6 +1,6 @@
 /*******************************************************************************
  JS-SCHEME - a Scheme interpreter written in JavaScript
- (c) 2008 Erik Silkensen, erik@silkensen.com, version 0.4
+ (c) 2010 Erik Silkensen, eriksilkensen@gmail.com, version 0.4
 
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software
