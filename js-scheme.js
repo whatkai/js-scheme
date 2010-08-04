@@ -1,6 +1,6 @@
 /*******************************************************************************
  JS-SCHEME - a Scheme interpreter written in JavaScript
- (c) 2010 Erik Silkensen, eriksilkensen@gmail.com, version 0.4
+ (c) 2009 Erik Silkensen, erik@silkensen.com, version 0.4
  This program is free software: you can redistribute it and/or modify it under
  the terms of the GNU General Public License as published by the Free Software
  Foundation, either version 3 of the License, or (at your option) any later
@@ -54,6 +54,7 @@ var Tokens = {
   R_PAREN: ')',
   SEMI_COLON: ';',
   SET: 'set!',
+  SET_CAR: 'set-car!',
   SINGLE_QUOTE: '\'',
   SPACE: ' ',
   STRING: '^[\\"](([^\\"\\\\]|([\\\\].))*)[\\"]'
@@ -92,6 +93,9 @@ var Util = new (Class.create({
   },
   cdr: function(list) {
     return list.slice(1);
+    var tmp = list.clone();
+    tmp.shift();
+    return tmp;
   },
   cons: function(x, list) {
     var tmp = list.clone();
@@ -168,6 +172,16 @@ var Util = new (Class.create({
     } else {
       return Object.inspect(expr).gsub('[\\[]','(').gsub(']',')').gsub(',','')
 	.gsub('\'','');
+    }
+  },
+  makeListFromArray: function(arr) {
+    if (!Object.isArray(arr)) {
+	throw new TypeError(arr + "is not an array");
+    }
+    if (arr.length == 0) {
+	return [];
+    } else {
+	return new Pair(arr[0], this.makeListFromArray(arr.slice(1)));
     }
   },
   map: function(op, args) {
@@ -260,20 +274,19 @@ var Pair = Class.create({
   isNullTerminated: function() {
     if (Util.isNull(this.cdr)) {
       return true;
-    } else if (Object.isArray(this.cdr) && this.cdr.length == 1 &&
-	       this.cdr[0] instanceof Pair) {
-      return this.cdr[0].isNullTerminated();
+    } else if (this.cdr instanceof Pair) {
+      return this.cdr.isNullTerminated();
     } else {
       return false;
     }
   },
   toStringList: function() {
-    return Util.format(this.car) + (Util.isNull(this.cdr) ? '' : ' ' +
-			       Util.format(this.cdr[0]));
+    return Util.format(this.car) + (Util.isNull(this.cdr) ? '' : (' ' +
+			       this.cdr.toStringList()));
   },
   toString: function() {
     if (this.isNullTerminated()) {
-      return this.toStringList();
+      return '(' + this.toStringList() + ')';
     }
     return (this.parens ? '(' : '') + Util.format(this.car) + ' . ' +
       Util.format(this.cdr) + (this.parens ? ')' : '');
@@ -593,7 +606,7 @@ var ReservedSymbolTable = new Hash({
   'abs': new Builtin('abs', function(args) {
     if (args.length != 1)
       throw IllegalArgumentCountError('abs', 'exactly', 1, args.length);
-    if (!isNumber(args[0]))
+    if (!Util.isNumber(args[0]))
       throw IllegalArgumentTypeError('abs', args[0], 1);
     return Math.abs(args[0]);
   }, 'Returns the absolute value of <em>number</em>.', 'number'),
@@ -711,12 +724,8 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentCountError('car', 'exactly', 1, args.length);
     } else if (args[0] instanceof Pair) {
       ans = args[0].car;
-    } else if (Util.isAtom(args[0]) || Util.isNull(args[0])) {
-      throw IllegalArgumentTypeError('car', args[0], 1);
-    } else if (args[0][0] instanceof Pair) {
-      ans = args[0][0].car;
     } else {
-      ans = args[0][0];
+      throw IllegalArgumentTypeError('car', args[0], 1);
     }
     return ans;
   }, '<p>Returns the contents of the car field of <em>pair</em>.</p>' +
@@ -757,12 +766,8 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentCountError('cdr', 'exactly', 1, args.length);
     } else if (args[0] instanceof Pair) {
       ans = args[0].cdr;
-    } else if (Util.isAtom(args[0]) || Util.isNull(args[0])) {
-      throw IllegalArgumentTypeError('cdr', args[0], 1);
-    } else if (args[0][0] instanceof Pair) {
-      ans = args[0][0].cdr;
     } else {
-      ans = Util.cdr(args[0]);
+      throw IllegalArgumentTypeError('cdr', args[0], 1);
     }
     return ans;
   },'<p>Returns the contents of the cdr field of <em>pair</em>.</p>' +
@@ -794,11 +799,7 @@ var ReservedSymbolTable = new Hash({
   'cons': new Builtin('cons', function(args) {
     if (args.length != 2)
       throw IllegalArgumentCountError('cons', 'exactly', 2, args.length);
-    if (Util.isAtom(args[1])) {
-      return new Pair(args[0], args[1]);
-    } else {
-      return Util.cons(args[0], args[1]);
-    }
+    return new Pair(args[0], args[1]);
   }, 'Returns a newly allocated pair whose car is <em>obj<sub>1</sub></em> ' +
     'and whose cdr is <em>obj<sub>2</sub></em>.',
     'obj<sub>1</sub> obj<sub>2</sub>'),
@@ -1070,13 +1071,6 @@ var ReservedSymbolTable = new Hash({
     ' a fixed number of arguments.</p></li><li>variable<p>The procedure takes '+
     'any number of arguments, stored in a list with the name <em>variable' +
     '</em>.</p></li></ul>', '&lt;formals&gt; body'),
-  'length': new Builtin('length', function(args) {
-    if (args.length != 1)
-      throw IllegalArgumentCountError('length', 'exactly', 1, args.length);
-    if (!Object.isArray(args[0]))
-      throw IllegalArgumentTypeError('length', args[0], 1);
-    return args[0].length;
-  }, 'Returns the length of <em>list</em>.', 'list'),
   'let': new SpecialForm('let', function(e, env) {
     var expr = Util.cons(Util.cons(Tokens.LAMBDA,
                                    Util.cons(Util.map(function(el) {
@@ -1150,28 +1144,9 @@ var ReservedSymbolTable = new Hash({
     '<p><em>body</em> is evaluated in an extended environment.</p>',
      'bindings body'),
   'list': new Builtin('list', function(args) {
-    return args;
+    return Util.makeListFromArray(args);
   }, 'Returns a list made up of the arguments.',
     'obj<sub>1</sub> . obj<sub>n</sub>'),
-  'list?': new Builtin('list?', function(args) {
-    if (args.length != 1) {
-      throw IllegalArgumentCountError('list?', 'exactly', 1, args.length);
-    } else if (Util.isAtom(args[0])) {
-      return false;
-    } else if (Util.isNull(args[0])) {
-      return true;
-    } else {
-      var ans = true;
-      for (var i = 0; i < args[0].length; i++) {
-	if (Util.isAtom(args[0][i]) && (args[0][i] instanceof Pair) &&
-	    !Util.isNull(args[0][i].cdr)) {
-	    ans = false;
-	    break;
-	}
-	return ans;
-      }
-    }
-  }, 'Returns #t if <em>obj</em> is a list, and returns #f otherwise.', 'obj'),
   'list-ref': new Builtin('list-ref', function(args) {
     if (args.length != 2) {
       throw IllegalArgumentCountError('list-ref', 'exactly', 2, args.length);
@@ -1195,7 +1170,7 @@ var ReservedSymbolTable = new Hash({
       throw IllegalArgumentCountError('list-tail', 'exactly', 2, args.length);
     } else if (!Object.isArray(args[0])) {
       throw IllegalArgumentTypeError('list-tail', args[0], 1);
-    } else if (!Util.isNumber(args[1])) {
+v    } else if (!Util.isNumber(args[1])) {
       throw IllegalArgumentTypeError('list-tail', args[1], 2);
     } else if (args[1] < 0) {
       throw IllegalArgumentError('The object ' + args[1] + ', passed as an ' +
@@ -1238,35 +1213,6 @@ var ReservedSymbolTable = new Hash({
     Util.validateNumberArg('log', args);
     return Math.log(args[0]) / Math.log(2);
   }, 'Returns the natural logarithm (base 2) of <em>z</em>.', 'z'),
-  'map': new Builtin('map', function(args) {
-    if (args.length < 2)
-      throw IllegalArgumentCountError('map', 'at least', 2, args.length);
-    var proc = args[0];
-    if (proc instanceof Builtin) {
-      proc = proc.apply;
-    }
-    if (typeof proc != 'function') {
-      throw IllegalArgumentTypeError('map', proc, 1);
-    }
-    var lists = Util.cdr(args);
-    for (var i = 1; i < lists.length; i++) {
-      if (lists[i].length != lists[0].length)
-	throw IllegalArgumentError("all of the lists must be the same length");
-    }
-    var res = [];
-    for (var j = 0; j < lists[0].length; j++) {
-      var pargs = [];
-      for (var k = 0; k < lists.length; k++) {
-	pargs.push(lists[k][j]);
-      }
-      var val = proc.apply(this, [pargs]);
-      res.push(val);
-    }
-    return res;
-  }, '<p>Applies <em>proc</em> element-wise to the elements of the ' +
-    '<em>list</em>s and returns a list of the results, in order.</p>' +
-    '<p><em>Proc</em> must be a function of as many arguments as there are ' +
-    'lists specified.</p>', 'proc list<sub>1</sub> . list<sub>n</sub>'),
   'modulo': new Builtin('modulo', function(args) {
     if (args.length != 2) {
       throw IllegalArgumentCountError('modulo', 'exactly', 2, args.length);
@@ -1325,7 +1271,7 @@ var ReservedSymbolTable = new Hash({
   'pair?': new Builtin('pair?', function(args) {
     if (args.length != 1)
       throw IllegalArgumentCountError('pair?', 'exactly', 1, args.length);
-    return !Util.isNull(args[0]) && !Util.isAtom(args[0]);
+    return !Util.isNull(args[0]) && (args[0] instanceof Pair);
   }, 'Returns #t if <em>obj</em> is a pair, and returns #f otherwise.', 'obj'),
   'pi': Math.PI,
   'procedure?': new Builtin('procedure?', function(args) {
@@ -1339,7 +1285,11 @@ var ReservedSymbolTable = new Hash({
     return function(args) {
       if (args.length != 1)
 	throw IllegalArgumentCountError('quote', 'exactly', 1, args.length);
-      return args[0];
+      if (Object.isArray(args[0])) {
+	  return Util.makeListFromArray(args[0]);
+      } else {
+	  return args[0];
+      }
     }(Util.cdr(e));
   }, '<p>Evaluates to <em>datum</em>.</p><p>The single-quote character ' +
     '<strong>\'</strong> may also be used as an abbreviation, where ' +
@@ -1383,6 +1333,55 @@ var ReservedSymbolTable = new Hash({
     'already be in the environment. If no <em>expression</em> is present, ' +
     '0 is used. Returns the original value that <em>variable</em> referred to.',
     'variable [expression]'),
+  'set-car!': new SpecialForm('set-car!', function(e, env) {
+    var oldBox = undefined;
+    var name = e[1].toLowerCase();
+    var old = ReservedSymbolTable.get(name);
+    if (old === undefined) {
+	oldBox = env.lookup(name);
+        old = oldBox.unbox();
+    }
+    var rhs = Util.isNull(Util.cdr(Util.cdr(e))) ? 0 : e[2];
+    var val = jscm_eval(rhs, env);
+    if (oldBox === undefined) {
+	throw UnboundVariableError("Undefined symbol!");
+    } else {
+	if (Util.isNull(old) || Util.isAtom(old) && !(old instanceof Pair)) {
+	    throw IllegalArgumentTypeError('set-car!', old, 1);
+	} else {
+            if (old instanceof Pair) {
+		var old_car = old.car;
+		old.car = val;
+	    } else {
+		var old_car = old[0];
+		old[0] = val;
+	    }
+        }
+        return old;
+    }
+  }, 'Sets the car. Does not discard the modified pair'),
+  'set-cdr!': new SpecialForm('set-cdr!', function(e, env) {
+    var oldBox = undefined;
+    var name = e[1].toLowerCase();
+    var old = ReservedSymbolTable.get(name);
+    if (old === undefined) {
+	oldBox = env.lookup(name);
+        old = oldBox.unbox();
+    }
+    var rhs = Util.isNull(Util.cdr(Util.cdr(e))) ? 0 : e[2];
+    var val = jscm_eval(rhs, env);
+    if (oldBox === undefined) {
+	throw UnboundVariableError("Undefined symbol!");
+    } else {
+      if (Util.isNull(old) || Util.isAtom(old) && !(old instanceof Pair)) {
+        throw IllegalArgumentTypeError('set-cdr!', old, 1);
+      } else {
+        var old_cdr = old.cdr;
+        old.cdr = val;
+      }
+      return old;
+    }
+  }, 'Sets the cdr. Does not discard the modified pair'),
   'sin': new Builtin('sin', function(args) {
     Util.validateNumberArg('sin', args);
     return Math.sin(args[0]);
@@ -1814,9 +1813,45 @@ function jscm_onkeydown(e) {
   }
 }
 
+function define_builtins() {
+    var builtins = [
+      '(define (map f l)'
+      + '(if (null? l)'
+      + '\'()'
+      + '(cons (f (car l)) (map f (cdr l)))'
+      + '))',
+      '(define (length l)'
+      + '(if (null? l)'
+      + '0'
+      + '(+ 1 (length (cdr l)))))',
+      '(define (list-ref l i)'
+      + '(if (= i 0)'
+      + '(car l)'
+      + '(list-ref (cdr l) (- i 1)))'
+      + ')',
+      '(define (list-tail l i)'
+      + '(if (= i 0)'
+      + 'l'
+      + '(list-tail (cdr l) (- i 1))))',
+      '(define (list? x)'
+      + '(cond ((null? x) #t)'
+      + '((pair? x) (list? (cdr x)))'
+      + '(else #f)))'
+    ];
+    for (var i=0; i < builtins.length; i++) {
+	jscm_eval(REPL.parser.parse(builtins[i]), GlobalEnvironment);
+    }
+}
+
+function install_js_scheme() {
+  GlobalEnvironment = new Environment();
+  REPL = new Interpreter();
+}
+
 window.onload = function() {
   GlobalEnvironment = new Environment();
   REPL = new Interpreter();
+  define_builtins();
   $(Document.INPUT).onkeydown = jscm_onkeydown;
   REPL.focus();
 };
